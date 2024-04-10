@@ -44,3 +44,75 @@ if __name__ == "__main__":
 			]:
 		test_overlap(args, expected)
 	print("All Tests Done!")
+
+
+#%%
+import matplotlib.pyplot as plt
+
+class Curve:
+	curr_index = 0
+	color_table = ["deepskyblue", "darkorange", "blueviolet", "blue",
+					   "crimson", "dimgrey", "mediumturquoise", "deeppink"]
+
+	def __init__(self, x, y=None, e=None, label=None, color=None):
+		if isinstance(x, dict):
+			label = x.get('label', label)
+			color = x.get('color', color)
+			e = x['e']
+			y = x['y']
+			x = x['x']
+		
+		self._x = x
+		self._y = y
+		self._e = e
+		self._label = label
+
+		if color:
+			self._color = color
+		else:
+			self._color = Curve.color_table[Curve.curr_index]
+			if Curve.curr_index < len(Curve.color_table)-1:
+				Curve.curr_index += 1
+			else:
+				Curve.curr_index = 0
+		
+	def plot_error(self, ax: plt.Axes=None):
+		if ax is None: ax = plt.gca()
+		x = self._x
+		y1 = self._y - self._e
+		y2 = self._y + self._e
+		ax.fill_between(x, y1, y2, color=self._color, alpha=0.25)
+		ax.plot(x, y1, color=self._color, alpha=0.3)
+		ax.plot(x, y2, color=self._color, alpha=0.3)
+	
+	def plot_curve(self, ax: plt.Axes=None):
+		if ax is None: ax = plt.gca()
+		ax.plot(self._x, self._y, color=self._color, label=self._label)
+
+
+if __name__ == "__main__":
+	import numpy as np
+	x = np.linspace(0, 10)
+	e = np.ones(len(x))
+	c1 = Curve(x, -0.2*x**2 + x, e, "Curve 1")
+	c2 = Curve(x, 0.2*x**2 - x - 10, e, "Curve 2")
+	c1.plot_error()
+	c1.plot_curve()
+	c2.plot_error()
+	c2.plot_curve()
+	plt.legend(loc=10)
+
+
+#%%
+def progress_bar(pos, max_pos, size=32):
+	size -= 2
+	f = pos/max_pos
+	n = int(f*size + 0.5)
+	text = "\r[" + '='*n + ' '*(size-n) + f"] {100*f:.0f}%"
+	print(text, end='')
+
+
+if __name__ == "__main__":
+	progress_bar(30, 100)
+	progress_bar(50, 100)
+	progress_bar(80, 100)

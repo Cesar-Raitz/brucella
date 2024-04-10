@@ -228,7 +228,7 @@ def multi_blob_count(img_path: str,
 							max_sigma=5) -> np.ndarray:
 	"""Utility function to generate a matrix of blob counts using
 	   three blob detection functions: blob_log, blob_dog, and blob_doh,
-		and threshold arrays for each one.
+		and threshold arrays for each one (with the same ordering!)
 	"""
 	img = imread(img_path)
 	if add_constrast: img = rescale_intensity(img)
@@ -263,114 +263,103 @@ plt.show()
 
 #%%
 # Count all blobs in the training set
-from util import beep
+from util import beep, progress_bar, Curve
 
-def count_blobs_for_class(X, ts: list, add_constrast=False):
+def df_blob_count(X: DataFrame, ts: list, add_constrast=False) -> dict:
 	"""Utility function that count blobs for several images in a Pandas
-		DataFrame. Don't forget about the thresholds (ts) lists' order:
+		DataFrame. Don't forget the order of thresholds (ts) lists:
 		LoG, DoG, DoH.
 	"""
 	bcmm = []
-	k, kk = 0, 0
-	print(end='0')
+	k, kk = 0, len(X)
+	progress_bar(k, kk)
 	for _, row in X.iterrows():
 		path = os.path.join("output", row["folder"], row["name"])
 		bcm = multi_blob_count(path, tlog=ts, add_constrast=add_constrast)
 		bcmm.append(bcm)
 		k += 1
-		if k == 10:
-			k, kk = 0, kk+1
-			print(end=str(kk))
+		progress_bar(k, kk)
+	print(f"\n-> {len(X)} instances for target={t}")
 
+	bcd = {}
 	bcmm = np.array(bcmm)
-	print(f" -> {len(X)} instances for target={c}")
-	return bcmm.mean(axis=0), bcmm.std(axis=0)
+	means = bcmm.mean(axis=0)
+	stds = bcmm.std(axis=0)
+	labels = ["LoG", "DoG", "DoH"]
+	for x, y, e, l in zip(ts, means, stds, labels):
+		bcd[l] = dict(x=x, y=y, e=e)
+	return bcd
 
+# X = X_train.iloc[:30]
+# y = y_train.iloc[:30]
+X = X_train
+y = y_train
+num_points = 20
+x_thr = [np.linspace(0.1, 0.24, num_points), # LoG scale
+			np.linspace(0.06, 0.18, num_points), # DoG scale
+	      np.linspace(0.2e-3, 5e-3, num_points)] # DoH scale
 
-X = X_train #.iloc[:30]
-y = y_train #.iloc[:30]
-num_points = 16
-x_thr = [np.linspace(0.1, 0.2, num_points), # LoG scale
-			np.linspace(0.05, 0.15, num_points), # DoG scale
-	      np.linspace(0.2e-3, 3e-3, num_points)] # DoH scale
-# x_thr[1] = x_thr[0]
-
-bcm_me = []
-for c in [0, 1]:
-	# Calculate the blob counts' mean and error for target class c
-	bcme = count_blobs_for_class(X[y==c], ts=x_thr, add_constrast=True)
-	bcm_me.append(bcme)
-	print(bcme)
+bc_curves = [[0, 0] for _ in range(3)]
+tnames = [" negative", " positive"]
+colors = ["darkorange", "deepskyblue"]
+for t, tn, c in zip([0, 1], tnames, colors):
+	# Calculate the blob counts' mean and error for one target
+	bcd = df_blob_count(X[y==t], ts=x_thr, add_constrast=True)
+	# Convert the data dictionaries to Curve to plot them later
+	for i, key in enumerate(bcd):
+		bc_curves[i][t] = Curve(bcd[key], color=c, label=key+tn)
 	beep()
 
-# neg_cnt, neg_err = bcm_me[0]
-# pos_cnt, pos_err = bcm_me[1]
-
 #%%
-def plot_werror(xyel: list):
-	"""Plot one or more x, y, error, label sets.
-	"""
-	colors = ["dodgerblue", "darkorange"]
-	for (x, y, e, l), c in zip(xyel, colors):
-		y1, y2 = y-e, y+e
-		plt.fill_between(x, y1, y2, color=c, alpha=0.25)
-		plt.plot(x, y1, color=c, alpha=0.4)
-		plt.plot(x, y2, color=c, alpha=0.4)
-		
-	for (x, y, e, l), c in zip(xyel, colors):
-		plt.plot(x, y, color=c, label=l)
-	
-	# plt.xscale("log")
-	plt.xlabel("Threshold")
-	plt.ylabel("Average Blob Count")
-	plt.legend()
+# Plot all curves
+def plot_blob_curves(curves: list[Curve], ax: plt.Axes):
+	for c in curves: c.plot_error()
+	for c in curves: c.plot_curve()
+	ax.set_xlim(curves[0]._x[[0,-1]])
+	ax.set_ylabel("Average Blob Count")
+	ax.set_xlabel("Threshold")
+	ax.legend()
+
 
 titles = ["Laplacian of Gaussian",
 			 "Difference of Gaussian",
 			 "Determinant of Hessian"]
-labels = ["LoG", "DoG", "DoH"]
-for x, yn, en, yp, ep, title, l in zip(x_thr,
-														 bcm_me[0][0], bcm_me[0][1],
-														 bcm_me[1][0], bcm_me[1][1],
-														 titles, labels):
-	plot_werror([
-		(x, yp, ep, l+" Positive"),
-		(x, yn, en, l+" Negative"),
-		])
-	plt.xlim(x[0], x[-1])
-	plt.title(title)
-	plt.show()
-# beep()
+
+for curves, title in zip(bc_curves, titles):
+	_, ax = plt.subplots()
+	assert isinstance(ax, plt.Axes)
+	plot_blob_curves(curves, ax)
+	ax.set_title(title)
+	ax.set_ylim(0, 40)
+	ax.grid()
+
 
 #%%
 # Blob counts for negative and positive images seem to intersect no matter what.
-# So we'll look for the least intersection.
-# from util import overlap
+# So we'll look for some minimum intersection.
+from util import overlap
 
-intersection_curves = []
-for x, yn, en, yp, ep, title, l in zip(x_thr,
-														 bcm_me[0][0], bcm_me[0][1],
-														 bcm_me[1][0], bcm_me[1][1],
-														 titles, labels):
-	intersection_curves.append([
-		overlap(a0, a1, b0, b1) for a0, a1, b0, b1 in
-			zip(yn-en, yn+en, yp-ep, yp+ep)
-		])
+_, axs = plt.subplots(3, 1, figsize=(4, 6))
+for curves, title, ax in zip(bc_curves, titles, axs):
+	yn, en = curves[0]._y, curves[0]._e
+	yp, ep = curves[1]._y, curves[1]._e
+	ovr = np.array([
+		overlap(max(a, 0), b, max(c, 0), d)/(d-c)
+			for a, b, c, d in zip(yn-en, yn+en, yp-ep, yp+ep)
+	])
+	
+	# imin = np.where(ovr < 0.10)[0][0]
+	# print(ovr[imin])
 
-#%%
-plt.plot(x_thr[0], intersection_curves[0], "ro-", label="LoG", ms=5)
-plt.plot(x_thr[1], intersection_curves[1], "gs-", label="DoG", ms=5)
+	yticks = np.arange(0, 0.21, 0.05)
+	
+	ax.grid()
+	ax.set_yticks(yticks)
+	ax.set_yticklabels([f'{int(100*n)}%' for n in yticks])
+	ax.set_ylim(yticks[0], yticks[-1])
+	ax.plot(curves[0]._x, ovr)
+	ax.set_title(title)
 
-plt.legend()
-plt.xlabel("Threshold")
-plt.ylabel("Positive-Negative Counts Overlap")
-plt.title("Laplacian/Difference of Gaussian")
-plt.show()
-
-# Plot the DoH curve alone since it has a very different scale
-plt.plot(x_thr[2], intersection_curves[2], "b^-")
-plt.xlabel("Threshold")
-plt.ylabel("Positive-Negative Counts Overlap")
-plt.title("Determinant of Hessian")
-# %%
-""
+axs[2].set_xlabel("Threshold")
+axs[1].set_ylabel("Positive-Negative Blob Counts Overlap")
+plt.tight_layout()
