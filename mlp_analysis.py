@@ -257,7 +257,6 @@ print(bcm)
 
 plt.plot(x[0], bcm[0], '.-')
 plt.plot(x[1], bcm[1], '.-')
-plt.show()
 plt.plot(x[2], bcm[2], '.-')
 plt.show()
 
@@ -295,29 +294,29 @@ def df_blob_count(X: DataFrame, ts: list, add_constrast=False) -> dict:
 X = X_train
 y = y_train
 num_points = 20
-x_thr = [np.linspace(0.1, 0.24, num_points), # LoG scale
-			np.linspace(0.06, 0.18, num_points), # DoG scale
-	      np.linspace(0.2e-3, 5e-3, num_points)] # DoH scale
+x_thr = [np.linspace(0.1, 0.3, num_points), # LoG scale
+			np.linspace(0.05, 0.25, num_points), # DoG scale
+	      np.linspace(0.0005, 0.02, num_points)] # DoH scale
 
 bc_curves = [[0, 0] for _ in range(3)]
-tnames = [" negative", " positive"]
+tnames = ["Negative", "Positive"]
 colors = ["darkorange", "deepskyblue"]
 for t, tn, c in zip([0, 1], tnames, colors):
 	# Calculate the blob counts' mean and error for one target
 	bcd = df_blob_count(X[y==t], ts=x_thr, add_constrast=True)
-	# Convert the data dictionaries to Curve to plot them later
+	# Create Curve's from data dictionaries to plot them later
 	for i, key in enumerate(bcd):
-		bc_curves[i][t] = Curve(bcd[key], color=c, label=key+tn)
+		bc_curves[i][t] = Curve(bcd[key], color=c, label=tn)
 	beep()
 
 #%%
 # Plot all curves
+
 def plot_blob_curves(curves: list[Curve], ax: plt.Axes):
-	for c in curves: c.plot_error()
-	for c in curves: c.plot_curve()
+	for c in curves: c.plot_error(ax)
+	for c in curves: c.plot_curve(ax)
 	ax.set_xlim(curves[0]._x[[0,-1]])
-	ax.set_ylabel("Average Blob Count")
-	ax.set_xlabel("Threshold")
+	ax.set_yticks(range(0, 31, 10))
 	ax.legend()
 
 
@@ -325,14 +324,17 @@ titles = ["Laplacian of Gaussian",
 			 "Difference of Gaussian",
 			 "Determinant of Hessian"]
 
-for curves, title in zip(bc_curves, titles):
-	_, ax = plt.subplots()
+_, axs = plt.subplots(3, 1, figsize=(6, 8))
+for curves, title, ax in zip(bc_curves, titles, axs):
 	assert isinstance(ax, plt.Axes)
 	plot_blob_curves(curves, ax)
 	ax.set_title(title)
-	ax.set_ylim(0, 40)
+	ax.set_ylim(0, 30)
 	ax.grid()
 
+axs[1].set_ylabel("Average Blob Count")
+axs[2].set_xlabel("Threshold")
+plt.tight_layout()
 
 #%%
 # Blob counts for negative and positive images seem to intersect no matter what.
