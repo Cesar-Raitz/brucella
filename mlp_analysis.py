@@ -222,6 +222,7 @@ from skimage.feature import blob_dog, blob_log, blob_doh
 
 def multi_blob_count(img_path: str,
 							thrs: np.ndarray,
+							sigmas=(5, 5, 7),
 							add_constrast=False,
 							) -> np.ndarray:
 	"""Utility function to generate a matrix of blob counts using
@@ -232,7 +233,6 @@ def multi_blob_count(img_path: str,
 	if add_constrast: img = rescale_intensity(img)
 	gray = rgb2gray(img)
 	bc_matrix = []
-	sigmas = (5, 5, 7)
 	fns = (blob_log, blob_dog, blob_doh)
 	for f, ts, ms in zip(fns, thrs, sigmas):
 		m = [len(f(gray, max_sigma=ms, threshold=t)) for t in ts]
@@ -251,16 +251,18 @@ x = [np.linspace(0.001, 0.14, num_points),     # LoG scale
 bcm = multi_blob_count(path, add_constrast=True, thrs=x)
 print(bcm)
 
-plt.plot(x[0], bcm[0], '.-')
-plt.plot(x[1], bcm[1], '.-')
-plt.plot(x[2], bcm[2], '.-')
+_, ax = plt.subplots(figsize=(6, 3))
+ax.plot(x[0], bcm[0], '.-')
+ax.plot(x[1], bcm[1], '.-')
+ax.plot(x[2], bcm[2], '.-')
 plt.show()
 
 #%%
 # Count all blobs in the training set
 from util import beep, progress_bar, Curve
 
-def df_blob_count(X: DataFrame, thrs: list, add_constrast=False) -> dict:
+def df_blob_count(X: DataFrame, thrs: list, sigmas=(5, 5, 7),
+						add_constrast=False) -> dict:
 	"""Utility function that count blobs for several images in a Pandas
 		DataFrame. Don't forget the order of thresholds (ts) lists:
 		LoG, DoG, DoH.
@@ -270,7 +272,8 @@ def df_blob_count(X: DataFrame, thrs: list, add_constrast=False) -> dict:
 	progress_bar(k, kk)
 	for _, row in X.iterrows():
 		path = os.path.join("output", row["folder"], row["name"])
-		bcm = multi_blob_count(path, thrs=thrs, add_constrast=add_constrast)
+		bcm = multi_blob_count(path, thrs=thrs, sigmas=sigmas,
+									  add_constrast=add_constrast)
 		bcmm.append(bcm)
 		k += 1
 		progress_bar(k, kk)
@@ -278,8 +281,8 @@ def df_blob_count(X: DataFrame, thrs: list, add_constrast=False) -> dict:
 
 	bcd = {}
 	bcmm = np.array(bcmm)
-	means = bcmm.mean(axis=0)
 	stds = bcmm.std(axis=0)
+	means = bcmm.mean(axis=0)
 	labels = ["LoG", "DoG", "DoH"]
 	for x, y, e, l in zip(thrs, means, stds, labels):
 		bcd[l] = dict(x=x, y=y, e=e)
@@ -292,14 +295,15 @@ y = y_train
 num_points = 20
 x_thr = [np.linspace(0.1, 0.3, num_points), # LoG scale
 			np.linspace(0.05, 0.25, num_points), # DoG scale
-	      np.linspace(0.0005, 0.015, num_points)] # DoH scale
+	      np.linspace(0.0005, 0.012, num_points)] # DoH scale
 
 bc_curves = [[0, 0] for _ in range(3)]
 tnames = ["Negative", "Positive"]
 colors = ["darkorange", "deepskyblue"]
 for t, tn, c in zip([0, 1], tnames, colors):
 	# Calculate the blob counts' mean and error for one target
-	bcd = df_blob_count(X[y==t], thrs=x_thr, add_constrast=True)
+	bcd = df_blob_count(X[y==t], thrs=x_thr, sigmas=(3, 3, 4.24),
+							  add_constrast=False)
 	# Create Curve's from data dictionaries to plot them later
 	for i, key in enumerate(bcd):
 		bc_curves[i][t] = Curve(bcd[key], color=c, label=tn)
@@ -319,16 +323,30 @@ titles = ["Laplacian of Gaussian",
 			 "Difference of Gaussian",
 			 "Determinant of Hessian"]
 
-_, axs = plt.subplots(3, 1, figsize=(6, 8))
-for curves, title, ax in zip(bc_curves, titles, axs):
-	assert isinstance(ax, plt.Axes)
-	plot_blob_curves(curves, ax)
-	ax.set_title(title)
-	ax.set_ylim(0, 30)
-	ax.grid()
+if False:
+	# Plot Log, Dog, and Doh results
+	_, axs = plt.subplots(3, 1, figsize=(6, 8))
+	for curves, title, ax in zip(bc_curves, titles, axs):
+		assert isinstance(ax, plt.Axes)
+		plot_blob_curves(curves, ax)
+		ax.set_title(title)
+		ax.set_ylim(0, 30)
+		ax.grid()
+	axs[1].set_ylabel("Average Blob Count")
+	axs[2].set_xlabel("Threshold")
 
-axs[1].set_ylabel("Average Blob Count")
-axs[2].set_xlabel("Threshold")
+else:
+	# Plot the Log and Doh results only (to fit in the presentation)
+	_, axs = plt.subplots(2, 1, figsize=(6, 5))
+	for curves, title, ax in zip(bc_curves[::2], titles[::2], axs):
+		assert isinstance(ax, plt.Axes)
+		plot_blob_curves(curves, ax)
+		ax.set_title(title)
+		ax.set_ylim(0, 30)
+		ax.grid()
+		ax.set_ylabel("Average Blob Count")
+	axs[1].set_xlabel("Threshold")
+	
 plt.tight_layout()
 
 #%%

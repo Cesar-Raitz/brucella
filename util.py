@@ -1,3 +1,14 @@
+"""
+	A set of tools for the Machine Leaning workflow.
+
+	Author: Cesar Raitz Junior
+	Creation: Feb-10-2024
+	Licence: MIT
+
+	Format: UTF-8 w/tabs
+"""
+__version__ = "1.00.1"
+
 import winsound
 
 def beep():
@@ -6,14 +17,11 @@ def beep():
 
 #%%
 def overlap(a0, a1, b0, b1) -> float:
+	"""Find the minimum intersection between two intervals."""
 	if a0 > a1: a0, a1 = a1, a0
 	if b0 > b1: b0, b1 = b1, b0
-	if a0 >= b1 or b0 >= a1:
-		return 0
-	elif b1 > a1:
-		return a1 - max(a0, b0)
-	else:
-		return b1 - max(a0, b0)
+	if a0 >= b1 or b0 >= a1: return 0
+	return min(a1, b1) - max(a0, b0)
 
 
 if __name__ == "__main__":
@@ -88,6 +96,9 @@ class Curve:
 	def plot_curve(self, ax: plt.Axes=None):
 		if ax is None: ax = plt.gca()
 		ax.plot(self._x, self._y, color=self._color, label=self._label)
+
+	def set_color(self, color: None):
+		self._color = color
 
 
 if __name__ == "__main__":
