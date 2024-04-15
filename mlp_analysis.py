@@ -221,11 +221,9 @@ from skimage.exposure import rescale_intensity
 from skimage.feature import blob_dog, blob_log, blob_doh
 
 def multi_blob_count(img_path: str,
-							tlog: np.ndarray,
-							tdog: np.ndarray=None,
-							tdoh: np.ndarray=None,
+							thrs: np.ndarray,
 							add_constrast=False,
-							max_sigma=5) -> np.ndarray:
+							) -> np.ndarray:
 	"""Utility function to generate a matrix of blob counts using
 	   three blob detection functions: blob_log, blob_dog, and blob_doh,
 		and threshold arrays for each one (with the same ordering!)
@@ -233,13 +231,11 @@ def multi_blob_count(img_path: str,
 	img = imread(img_path)
 	if add_constrast: img = rescale_intensity(img)
 	gray = rgb2gray(img)
-	if isinstance(tlog, list):
-		tlog, tdog, tdoh = tlog  # unpack scales
-	assert len(tlog) == len(tdog) == len(tdoh)
-	
 	bc_matrix = []
-	for f, ts in zip((blob_log, blob_dog, blob_doh), (tlog, tdog, tdoh)):
-		m = [len(f(gray, max_sigma=max_sigma, threshold=t)) for t in ts]
+	sigmas = (5, 5, 7)
+	fns = (blob_log, blob_dog, blob_doh)
+	for f, ts, ms in zip(fns, thrs, sigmas):
+		m = [len(f(gray, max_sigma=ms, threshold=t)) for t in ts]
 		bc_matrix.append(m)
 
 	return np.array(bc_matrix)
@@ -252,7 +248,7 @@ num_points = 16
 x = [np.linspace(0.001, 0.14, num_points),     # LoG scale
 	  np.linspace(0.001, 0.14, num_points),     # DoG scale
 	  np.linspace(0.0001, 0.0045, num_points)]  # DoH scale
-bcm = multi_blob_count(path, add_constrast=True, tlog=x)
+bcm = multi_blob_count(path, add_constrast=True, thrs=x)
 print(bcm)
 
 plt.plot(x[0], bcm[0], '.-')
@@ -264,7 +260,7 @@ plt.show()
 # Count all blobs in the training set
 from util import beep, progress_bar, Curve
 
-def df_blob_count(X: DataFrame, ts: list, add_constrast=False) -> dict:
+def df_blob_count(X: DataFrame, thrs: list, add_constrast=False) -> dict:
 	"""Utility function that count blobs for several images in a Pandas
 		DataFrame. Don't forget the order of thresholds (ts) lists:
 		LoG, DoG, DoH.
@@ -274,7 +270,7 @@ def df_blob_count(X: DataFrame, ts: list, add_constrast=False) -> dict:
 	progress_bar(k, kk)
 	for _, row in X.iterrows():
 		path = os.path.join("output", row["folder"], row["name"])
-		bcm = multi_blob_count(path, tlog=ts, add_constrast=add_constrast)
+		bcm = multi_blob_count(path, thrs=thrs, add_constrast=add_constrast)
 		bcmm.append(bcm)
 		k += 1
 		progress_bar(k, kk)
@@ -285,7 +281,7 @@ def df_blob_count(X: DataFrame, ts: list, add_constrast=False) -> dict:
 	means = bcmm.mean(axis=0)
 	stds = bcmm.std(axis=0)
 	labels = ["LoG", "DoG", "DoH"]
-	for x, y, e, l in zip(ts, means, stds, labels):
+	for x, y, e, l in zip(thrs, means, stds, labels):
 		bcd[l] = dict(x=x, y=y, e=e)
 	return bcd
 
@@ -296,22 +292,21 @@ y = y_train
 num_points = 20
 x_thr = [np.linspace(0.1, 0.3, num_points), # LoG scale
 			np.linspace(0.05, 0.25, num_points), # DoG scale
-	      np.linspace(0.0005, 0.02, num_points)] # DoH scale
+	      np.linspace(0.0005, 0.015, num_points)] # DoH scale
 
 bc_curves = [[0, 0] for _ in range(3)]
 tnames = ["Negative", "Positive"]
 colors = ["darkorange", "deepskyblue"]
 for t, tn, c in zip([0, 1], tnames, colors):
 	# Calculate the blob counts' mean and error for one target
-	bcd = df_blob_count(X[y==t], ts=x_thr, add_constrast=True)
+	bcd = df_blob_count(X[y==t], thrs=x_thr, add_constrast=True)
 	# Create Curve's from data dictionaries to plot them later
 	for i, key in enumerate(bcd):
 		bc_curves[i][t] = Curve(bcd[key], color=c, label=tn)
 	beep()
 
 #%%
-# Plot all curves
-
+# Plot all blob's threshold curves
 def plot_blob_curves(curves: list[Curve], ax: plt.Axes):
 	for c in curves: c.plot_error(ax)
 	for c in curves: c.plot_curve(ax)
