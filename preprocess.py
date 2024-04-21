@@ -13,6 +13,8 @@
 __version__ = "1.00"
 
 #%%
+import pandas
+from pandas import DataFrame
 import matplotlib.pyplot as plt
 import numpy as np
 import skimage
@@ -27,6 +29,15 @@ if __name__ == "__main__":
 		"03-07-23_negative1_15min.jpg",
 		"03-07-23_negative1_12min.jpg"
 	]
+
+# Default blob detection parameters
+LOG_SIGMA = 3
+DOG_SIGMA = 3
+DOH_SIGMA = 4.3
+
+LOG_THRES = 0.2
+DOG_THRES = 0.15
+DOH_THRES = 0.007
 
 #%%
 def read_image(path: str|np.ndarray) -> np.ndarray:
@@ -112,11 +123,11 @@ def crop_image(image_path: str|np.ndarray,
 		Returns
 		-------
 		A dictionary with the following keys:
-		  * name - Name of the image file
-		  * folder - Folder name (last level)
-		  * title - Folder name + file name
-		  * cropped - The cropped image
-		  * warnings - Possible image problems
+		  * `name` - Name of the image file
+		  * `folder` - Folder name (last level)
+		  * `title` - Folder name + file name
+		  * `cropped` - The cropped image
+		  * `warnings` - Possible image problems
 	"""
 	# CREATE A DICTIONARY FOR THE EXTRACTED DATA
 	the_dict = dict(name="", folder="", title="")
@@ -233,9 +244,12 @@ def get_hsv_means(image_path: dict|str|np.ndarray, bins=5, show=False) -> tuple:
 
 		Parameters
 		----------
-		  * image_path - Location of the image file or the image data or the dictionary containing the cropped image.
-		  * bins - Number of bins to generate the histogram, the counts will be divided by the number of pixels in the image, and added to the dictionary (if there's one) under the 'hX' keys.
-		  * show - Wether to show an image summary for the procedure.
+		  * `image_path` - Location of the image file or the image data or the
+		                   dictionary containing the cropped image.
+		  * `bins` - Number of bins to generate the histogram, the counts will be
+		             divided by the number of pixels in the image, and added to
+						 the dictionary (if there's one) under the 'hX' keys.
+		  * `show` - Wether to show an image summary for the procedure.
 		
 		Returns
 		-------
@@ -314,16 +328,28 @@ from skimage.morphology import area_closing, area_opening
 
 
 def count_blobs(image_path: dict|str|np.ndarray,
-					 log_sigma=5, log_thres=0.15,
-					 dog_sigma=5, dog_thres=0.10,
-					 doh_sigma=5, doh_thres=0.05,
-					 show=False) -> tuple:
-	"""Count the blob number using LoG, DoG, and DoH techniques.
+					 log_sigma=LOG_SIGMA, log_thres=LOG_THRES,
+					 dog_sigma=DOG_SIGMA, dog_thres=DOG_THRES,
+					 doh_sigma=DOH_SIGMA, doh_thres=DOH_THRES,
+					 return_blobs=False,
+					 show=False) \
+					 -> tuple | list:
+	"""Count the number of blobs using LoG, DoG, and DoH techniques.
 
-		In the case `image_path` is a dictionary, the image in the 'cropped' key
-		is used for analysis.
-		
 		Written with the help of Bianca Tieppo.
+
+		Parameters
+		----------
+		  * `image_path` - The path to read the image file or a dictionary
+					containing the RGB image array within the key "cropped".
+
+		  * `return_blobs` - True if the desired return value is the three arrays
+		  			containing the blob coordinates (x, y, r) for each technique.
+		
+		Returns
+		-------
+		  A tuple containing the blob count for each technique OR a list
+		  containing the blob coordinates for each technique.
 	"""
 	if isinstance(image_path, dict):
 		the_dict = image_path
@@ -336,7 +362,7 @@ def count_blobs(image_path: dict|str|np.ndarray,
 	gray = rgb2gray(img)
 	# Apply opening followed by closing filters
 	# (removes small bright and dark spots less than 5)
-	# img_morph = area_closing(area_opening(gray < 0.4, 5), 5)
+	# img_morph = area_closing(area_opening(gray > 0.4, 5), 5)
 	img_morph = gray
 
 	# Detect blobs using the three methods
@@ -393,13 +419,20 @@ def count_blobs(image_path: dict|str|np.ndarray,
 			name: num for name, num in zip(names, num_blobs)
 			})
 	
+	if return_blobs:
+		return all_blobs
 	return num_blobs
 
 
 if __name__ == "__main__":
-	d = crop_image(os.path.join(test_folder, test_names[0]),
-						fiber_length=700, fiber_diameter=36)
-	print( count_blobs(d, show=True) )
+	img_path = os.path.join(test_folder, test_names[0])
+	d = crop_image(img_path, fiber_length=700, fiber_diameter=36)
+	
+	# num_blobs = count_blobs(d, show=True,
+	# 		log_sigma=3, dog_sigma=3, doh_sigma=5,
+	# 		log_thres=0.2, dog_thres=0.15, doh_thres=0.007)
+	num_blobs = count_blobs(d, show=True)
+	print(num_blobs)
 
 
 #%%
@@ -430,8 +463,8 @@ def __info_from_path(path: str) -> dict:
 	return {"class": cls, "time": time, "date": date}
 	
 
-def process_folder(search_folder: str, fiber_length=0, fiber_diameter=0, bins=5,
-						 output_folder="output", as_frame=True) \
+def process_folder(search_folder: str, fiber_length=0, fiber_diameter=0,
+						 bins=5, output_folder="output", as_frame=True) \
 						-> DataFrame | list[dict]:
 	"""
 		Read and process all images within a folder and subfolders. Return a list
@@ -440,14 +473,16 @@ def process_folder(search_folder: str, fiber_length=0, fiber_diameter=0, bins=5,
 
 		Parameters
 		----------
-		  * folder - Base folder where to search for images.
-		  * fiber_length - Length to be cropped within the image.
-		  * fiber_diameter - Diameter to be cropped within the image.
-		  * bins - Number of bins to generate the histogram for the Value channel.
-		  * output_folder - The folder where to save the cropped images ("output"
-			 by default). Already existing images will be skipped. If empty, the
-			 input images will be processed but the resulting cropped images won't
-			 be saved.
+		  * `folder` - Base folder where to search for images.
+		  * `fiber_length` - Length to be cropped within the image.
+		  * `fiber_diameter` - Diameter to be cropped within the image.
+		  * `bins` - Number of bins to generate the histogram for the Value
+		             channel.
+		  * `output_folder` - The folder where the cropped images will be saved
+		                      ("output" by default). Already existing images will
+									 be skipped. If empty string, the input images will
+									 be processed but the resulting cropped images won't
+									 be saved.
 	"""
 	info_list = []
 	for base, subdirs, files in os.walk(search_folder):
@@ -479,7 +514,8 @@ def process_folder(search_folder: str, fiber_length=0, fiber_diameter=0, bins=5,
 			if output_folder:
 				if not os.path.isdir(out_folder): os.mkdir(out_folder)
 				cropped = skimage.util.img_as_ubyte(info["cropped"])
-				skimage.io.imsave(out_path, cropped, quality=95, check_contrast=False)
+				skimage.io.imsave(out_path, cropped, quality=95,
+							 			check_contrast=False)
 				# Todo: Check if the quality keyword fails for .PNG files
 			
 			if not output_folder:
@@ -497,94 +533,104 @@ def process_folder(search_folder: str, fiber_length=0, fiber_diameter=0, bins=5,
 if __name__ == "__main__":
 	folder = "test_images"
 	df = process_folder(folder, fiber_diameter=50, output_folder="")
-	df.head()  # won't show
+	print(df.head())
 
 
 #%%
-def __stack_images(img_list: list, vpad=10) -> tuple[np.ndarray, list]:
-	max_width = max([i.shape[1] for i in img_list])
-	white_stripe = np.ones((vpad, max_width, 3), dtype='float64')
-	new_list = []   # list of aligned images to be stacked
-	pos_list = []   # list of images' vertical position
-	y = 0           # current image's top position
-
-	for j, img in enumerate(img_list):
-		h, w, _ = img.shape
-		if w < max_width:
-			# Pad the current image to align horizontally
-			hpad = np.ones((h, max_width-w, 3), dtype='float64')
-			img = np.hstack([hpad, img])
-		
-		# Add the padded image to the list
-		new_list.append(img)
-		new_list.append(white_stripe)
-		pos_list.append(y + h//2)
-		y += h + vpad
-
-	summary_img = np.vstack(new_list[:-1])
-	return summary_img, pos_list
-
-
 def folders_summary(cropped_df: DataFrame, summary_folder="summaries",
-						  output_folder="output", dpi=100):
+						  output_folder="output", plot_blobs="log", dpi=100):
 	"""
 		Generate a summary of cropped images for each folder.
-		
-		If the cropped column is not available in the DataFrame, this funtion
-		will read the images from the `output_folder` ("output" by default).
-		The summary images are saved in the `summary_folder`
-		("summaries" by default).
+
+		Parameters
+		----------
+		  * `cropped_df` - A DataFrame containing a "folder" column,
+		  			and a "title" column with the file names (without extension)
+					or a "cropped" column with the images as NumPy arrays.
+
+		  * `summary_folder` - Where to save the summary images.
+
+		  * `output_folder` - Folder where the cropped images files will be read
+					if the DataFrame does not have the "cropped" column. It is
+					actually an "input" folder.
+
+		  * `plot_blobs` - A string indicating which detection algorithm to
+		  			use for plotting the blobs ("log", "dog" or "doh").
+					If empty, no blobs will be plotted.
+
+		  * `dpi` - The resolution to save the summary images.
 	"""
 	assert isinstance(cropped_df, DataFrame)
 	grouped = cropped_df.groupby("folder")
 	for folder, group in grouped:
 		if summary_folder:
-			out_path = os.path.join(summary_folder,
-				folder.replace(' ', '_') + "_summary.jpg")
+			name = folder.replace(' ', '_') + "_summary.jpg"
+			out_path = os.path.join(summary_folder, name)
 			
 			if os.path.exists(out_path):
 				print("○", out_path, "already exists!")
 				continue
 
 		# GENERATE AN IMAGE STACK AND PLOT
-		sorted = group.sort_values("time")
-		if "cropped" in cropped_df:
-			img_list = sorted["cropped"]
-		else:
-			img_list = []
-			for title in sorted["title"]:
-				img_list.append(skimage.io.imread(
-					os.path.join(output_folder, title)
-				) / 255.0)
-		summary_img, pos_list = __stack_images(img_list)
-		# fig = plt.figure(figsize=(6, len(img_list)*0.2))
-		plt.imshow(summary_img)
-
-		# Add legends for class and measurement time
-		_, w, _ = summary_img.shape
-		for y, (index, row) in zip(pos_list, sorted.iterrows()):
-			total = sum(row[k] for k in ["blobs_log", "blobs_dog", "blobs_doh"])
-			plt.text(w+5,   y, row["class"][0].upper(), va="center")
-			plt.text(w+120, y, str(row["time"]), va="center", ha="right")
-			plt.text(w+230, y, str(total), va="center", ha="right")
+		sorted_df = group.sort_values("time")
 		
-		plt.text(w+120, -3, "min", va="bottom", ha="right", weight="bold")
-		plt.text(w+230, -3, "blobs", va="bottom", ha="right", weight="bold")
-		plt.title(f"Summary of /{folder}")
-		plt.tight_layout()
-		plt.axis("off")
+		num = len(sorted_df)
+		_, axs = plt.subplots(num, 1, figsize=(6, num*0.5))
+		col_x = (1.03, 1.1, 1.2)
+
+		for (_, row), ax in zip(sorted_df.iterrows(), axs):
+			assert isinstance(ax, plt.Axes)
+			img = row.get("cropped",
+					  skimage.io.imread(
+						  os.path.join(output_folder, row["title"])
+					  ) / 255.0
+					)
+			ax.imshow(img)
+
+			if plot_blobs:
+				# The only problem here is that the parameters used here for blob
+	 			# detection are default. They may be different from the parameters
+	  			# used during the main processing.
+				all_blobs = count_blobs(img, return_blobs=True)
+				types = dict(log=0, dog=1, doh=2)
+				if plot_blobs in types:
+					for y, x, r in all_blobs[types[plot_blobs]]:
+						c = plt.Circle((x, y), r, color="cyan", lw=1.2, fill=False)
+						ax.add_patch(c)
+				num_blobs = sum(len(blobs) for blobs in all_blobs)
+			else:
+				num_blobs = row["blobs_log"] + row["blobs_dog"] + row["blobs_doh"]
+			
+			legend = [row["class"][0].upper(), row["time"], num_blobs]
+			for x, text in zip(col_x, legend):
+				ax.text(x, 0.5, text, va="center", ha="right",
+				        transform=ax.transAxes)
+			ax.axis("off")
+
+		# Draw the column titles
+		columns = ["T", "min", "blobs"]
+		for x, text in zip(col_x, columns):
+			axs[0].text(x, 1.15, text, weight="bold", ha="right",
+					      transform=axs[0].transAxes)
+		plt.suptitle(f"Summary of /{folder}")
+
+
 		if summary_folder:
 			if not os.path.isdir(summary_folder): os.mkdir(summary_folder)
 			plt.savefig(out_path, bbox_inches="tight", pad_inches=0.1, dpi=dpi)
 			print("•", out_path, "saved")
+		
 		plt.show()
 
 
 if __name__ == "__main__":
-	# folders_summary(df[df["folder"] == "01-03-23_positive1"], "")  # no saving
-	# folders_summary(df[df["folder"] == "30-06-23_positive2"], "")  # no saving
-	# folders_summary(df[df["folder"] == "15-06-23_negative1"], "")  # no saving
-	folders_summary(df, "")  # don't save, just show
+	# Make the summary without saving
+	folders_summary(df[df["folder"] == "01-03-23_positive1"], "")
+	# folders_summary(df[df["folder"] == "30-06-23_positive2"], "")
+	# folders_summary(df[df["folder"] == "15-06-23_negative1"], "")
+	# folders_summary(df, "")
+	
+	# Save here
 	# folders_summary(df, "summaries")
 
 #%% MAIN
@@ -599,4 +645,10 @@ if __name__ == "__main__":
 		print("Done!")
 	
 	# process_all_data()
+
+#%%
+import pandas
+if __name__ == "__main__":
+	df = pandas.read_csv("data_jessica.csv", index_col=0)
  
+# %%
