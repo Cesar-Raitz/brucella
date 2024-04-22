@@ -27,13 +27,16 @@ def load_dataset(fname):
 		df = pandas.read_excel(fname)
 
 	target = df["class"].map({"positive":1, "negative":0})
-	df.drop(columns=["class", "title", "warnings"],
-			  inplace=True)
+
+
+	df.drop(columns=["title", "warnings"], inplace=True)
 	
 	# Categorize the measurement time
 	bins = list(range(0, 101, 20)) + [np.inf]
-	df["time"] = pandas.cut(df["time"], bins=bins, labels=range(1, len(bins)))
-	cat_counts = df["time"].value_counts()
+	df["time_cat"] = pandas.cut(df["time"], bins=bins,
+									  labels=range(1, len(bins)))
+	cat_counts = df["time_cat"].value_counts()
+	
 	print("Time Categories:")
 	for i in range(1, len(bins)):
 		print(f"   {i}: [{bins[i-1]:3}, {bins[i]:3}) min"
@@ -41,7 +44,8 @@ def load_dataset(fname):
 	return df, target, bins
 
 
-X_data, y_data, time_bins = load_dataset("data_jessica.csv")
+# Load the features extract from Jéssica's experiments in 2023
+X_data, y_data, time_bins = load_dataset("data_jessica_2.csv")
 
 cc = y_data.value_counts()
 print(len(X_data), "instances in this dataset")
@@ -49,21 +53,21 @@ print(cc[1], "Positive,", cc[0], "Negative")
 X_data.head(5)
 
 #%%
-X_data.info()
-
-#%%
 # Split the population in train/test sets keeping the time category proportions
 #===============================================================================
 from sklearn.model_selection import train_test_split
 
+# We create a combined feature to stratify on both time and target class
+strat_info = X_data["time_cat"].astype(int)*2 + y_data
+
 X_train, X_test, y_train, y_test = train_test_split(
 		X_data, y_data, test_size=0.2, random_state=42,
-		stratify=X_data["time"])
+		stratify=strat_info)
 
 # Inspect the test/data proportions per time with a histogram
 rel_counts = lambda s: s.value_counts().sort_index() / len(s)
-test_counts = rel_counts(X_test['time'])
-total_counts = rel_counts(X_data['time'])
+test_counts = rel_counts(X_test['time_cat'])
+total_counts = rel_counts(X_data['time_cat'])
 
 _, ax = plt.subplots()
 assert isinstance(ax, plt.Axes)
@@ -85,24 +89,33 @@ ax.legend();
 
 
 #%%
-# Create a Multi-Layer Perceptron classifier model
+# Create a Multi-Layer Perceptron Cassifier model
 #===============================================================================
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.compose import make_column_transformer
 from sklearn.pipeline import make_pipeline
 
+ct = make_column_transformer(
+	(StandardScaler(), ["mean_h", "mean_s", "mean_v"]),
+	(StandardScaler(), ["blobs_log", "blobs_dog", "blobs_doh"]),
+	("passthrough",    ["h1", "h2", "h3", "h4", "h5"])
+	)
 
-mlp_clf = MLPClassifier(activation="relu", alpha=0.0001, hidden_layer_sizes=(10),
-								learning_rate="constant", solver="lbfgs", max_iter=2000)
-drop_cats = make_column_transformer(("drop", ["time", "name", "folder", "date"]),
-												remainder="passthrough")
-pipeline = make_pipeline(drop_cats, StandardScaler(), mlp_clf)
+mlp_clf = MLPClassifier(activation="relu",
+								alpha=0.0001,
+								hidden_layer_sizes=(10),
+								learning_rate="constant",
+								solver="lbfgs",
+								max_iter=2000)
+
+pipeline = make_pipeline(ct, mlp_clf)
 pipeline.fit(X_train, y_train)
 y_pred = pipeline.predict(X_test)
 correct = np.count_nonzero(y_pred == y_test)
 print(f"{correct} ({correct/len(y_test)*100:.2f}%) correct predictions")
-print("Total layers =", mlp_clf.n_layers_)
+print("Total MLP layers =", mlp_clf.n_layers_)
+pipeline
 
 #%%
 from sklearn.metrics import confusion_matrix, roc_auc_score, brier_score_loss
@@ -137,7 +150,7 @@ DataFrame([
 #%%
 from sklearn.model_selection import GridSearchCV
 
-def scores_from_grid(gs: GridSearchCV, index=-1) -> DataFrame:
+def scores_from_gridsearch(gs: GridSearchCV, index=-1) -> DataFrame:
 	"""Produce a pandas.DataFrame for Train/Test scores on separate rows.
 	"""
 	results = gs.cv_results_
@@ -190,10 +203,10 @@ for prm, val in grid_search.best_params_.items():
 	print(f"  {prm}: {val}")
 
 # Summarize scores for train/validation sets
-df_scores = scores_from_grid(grid_search)
+df_scores = scores_from_gridsearch(grid_search)
 # df_scores
 
-# Add scores for the test group (only for the final model)
+# Add scores for the test group (for the final model only)
 if False:
 	if isinstance(scoring, dict):
 		new_dict = {}

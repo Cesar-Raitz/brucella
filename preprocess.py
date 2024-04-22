@@ -624,16 +624,7 @@ def folders_summary(cropped_df: DataFrame, summary_folder="summaries",
 
 
 if __name__ == "__main__":
-	# Generate summaries without saving
-	summary_no_save = lambda folder, pb: folders_summary(
-			df_all[df_all["folder"] == folder],
-			summary_folder="", plot_blobs=pb
-		)
-	
-	# summary_no_save("01-03-23_positive1", "log")
-	# summary_no_save("30-06-23_positive2", "doh")
-	summary_no_save("15-06-23_negative1", "log")
-	# folders_summary(df, "")  # all folders!
+	# folders_summary(df, "")  # all folders and no saving!
 	
 	# Generate summaries AND SAVE
 	# folders_summary(df, "summaries")
@@ -659,3 +650,39 @@ if __name__ == "__main__":
 if __name__ == "__main__":
 	# Read data obtained from experiments performed by Jéssica
 	df_all = pandas.read_csv("data_jessica.csv", index_col=0)
+
+
+#%%
+# Generate summaries for processed data
+if __name__ == "__main__":
+	# Generate summaries without saving
+	summary_no_save = lambda folder, pb: \
+		folders_summary(
+			df_all[df_all["folder"] == folder],
+			summary_folder="", plot_blobs=pb
+		)
+	
+	# summary_no_save("01-03-23_positive1", "log")
+	# summary_no_save("30-06-23_positive2", "log")
+	# summary_no_save("15-06-23_negative1", "log")
+
+	folders_summary(df_all, "summaries_2")   # go grab a cup of coffee...
+
+
+#%%
+# Count blobs again with different parameters and save
+if __name__ == "__main__":
+	new_count = []
+	for title in df_all["title"]:
+		path = os.path.join("output", title)
+		new_count.append(count_blobs(path))
+	
+	new_count = np.array(new_count).T
+	df_all["blobs_log"] = new_count[0]
+	df_all["blobs_dog"] = new_count[1]
+	df_all["blobs_doh"] = new_count[2]
+
+	# Save again
+	csv_name = "data_jessica_2.csv"
+	df_all.to_csv(csv_name)
+	print(csv_name, "saved!")
