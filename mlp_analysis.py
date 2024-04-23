@@ -27,8 +27,6 @@ def load_dataset(fname):
 		df = pandas.read_excel(fname)
 
 	target = df["class"].map({"positive":1, "negative":0})
-
-
 	df.drop(columns=["title", "warnings"], inplace=True)
 	
 	# Categorize the measurement time
@@ -51,6 +49,7 @@ cc = y_data.value_counts()
 print(len(X_data), "instances in this dataset")
 print(cc[1], "Positive,", cc[0], "Negative")
 X_data.head(5)
+
 
 #%%
 # Split the population in train/test sets keeping the time category proportions
@@ -95,26 +94,39 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.compose import make_column_transformer
 from sklearn.pipeline import make_pipeline
+import functools
+
+feat_hsv = ["mean_h", "mean_s", "mean_v"]
+feat_blobs = ["blobs_log", "blobs_dog", "blobs_doh"]
+feat_histo = ["h1", "h2", "h3", "h4", "h5"]
+
+def _if_present(cols: list, df: DataFrame) -> list:
+	return [c for c in cols if c in df.columns]
+
+def if_present(cols: list) -> list:
+	return functools.partial(_if_present, cols)
+
+def simplify_feature_names(features: list) -> list:
+	return [f.split('__')[-1] for f in features]
 
 ct = make_column_transformer(
-	(StandardScaler(), ["mean_h", "mean_s", "mean_v"]),
-	(StandardScaler(), ["blobs_log", "blobs_dog", "blobs_doh"]),
-	("passthrough",    ["h1", "h2", "h3", "h4", "h5"])
-	)
+	(StandardScaler(), if_present(feat_hsv)),
+	(StandardScaler(), if_present(feat_blobs)),
+	("passthrough", if_present(feat_histo)))
 
-mlp_clf = MLPClassifier(activation="relu",
-								alpha=0.0001,
-								hidden_layer_sizes=(10),
-								learning_rate="constant",
-								solver="lbfgs",
-								max_iter=2000)
+mlp = MLPClassifier(activation="relu",
+						  hidden_layer_sizes=(16, 4, 1),
+						  #learning_rate="constant",
+						  solver="lbfgs",
+						  max_iter=1000)
 
-pipeline = make_pipeline(ct, mlp_clf)
+pipeline = make_pipeline(ct, mlp)
 pipeline.fit(X_train, y_train)
 y_pred = pipeline.predict(X_test)
 correct = np.count_nonzero(y_pred == y_test)
+print("Features:", simplify_feature_names(pipeline[0].get_feature_names_out()))
 print(f"{correct} ({correct/len(y_test)*100:.2f}%) correct predictions")
-print("Total MLP layers =", mlp_clf.n_layers_)
+print("Total layers =", mlp.n_layers_)
 pipeline
 
 #%%
@@ -133,19 +145,28 @@ def my_scorer(clf, X, y):
 		Brier Loss function.
 	"""
 	y_pred = clf.predict(X)
-	TN, FP, FN, TP = confusion_matrix(y_pred, y).ravel()
+	TN, FP, FN, TP = confusion_matrix(y, y_pred).ravel()
 	accuracy = (TN+TP) / len(y_pred)
 	precision = TP / (TP+FP)
 	recall = TP / (TP+FN)
 	f1 = 2*precision*recall / (precision+recall)
 	return {"Accuracy": accuracy, "Precision": precision, "Recall": recall,
-			  "AUC": roc_auc_score(y_pred, y), "Loss": brier_score_loss(y_pred, y),
+			  "AUC": roc_auc_score(y, y_pred), "Loss": brier_score_loss(y, y_pred),
 			  "F1": f1, "TN": TN, "FP": FP, "FN": FN, "TP": TP}
+
 
 DataFrame([
 	 my_scorer(pipeline, X_train, y_train),
 	 my_scorer(pipeline, X_test, y_test)
 ], index=["Train", "Test"])
+
+#%%
+# Order the first layer coefficients to evaluate which is more important
+coefficients = pandas.Series(
+	data=abs(pipeline.named_steps["mlpclassifier"].coefs_[0][:,0]),
+	index=feat_hsv + feat_blobs + feat_histo
+)
+coefficients.sort_values(ascending=False)
 
 #%%
 from sklearn.model_selection import GridSearchCV
@@ -175,54 +196,64 @@ def scores_from_gridsearch(gs: GridSearchCV, index=-1) -> DataFrame:
 #%%
 # Use GridSearchCV to find the best hyper-parametes
 #===============================================================================
-from sklearn.metrics import get_scorer
 from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.metrics import get_scorer
+from util import beep
 
-# Define strategies for splitting and searching
-cv = StratifiedShuffleSplit(n_splits=50, test_size=0.15, random_state=0)
-param_grid = {
-	"mlpclassifier__hidden_layer_sizes": [(1,), (5,), (10,), (100,)],
-	"mlpclassifier__learning_rate_init": [0.001, 0.005]
-}
 
-# Scorers used for model evaluation
-scoring = my_scorer
-# scoring = dict(Accuracy="accuracy", Precision="precision",
-# 					Recall="recall", AUC="roc_auc",
-# 					Loss="neg_brier_score", F1="f1")
-refit = "Recall"
+def mlp_gridsearch(X_train, y_train, X_test, y_test, param_grid,
+						 n_splits=50, scoring=my_scorer, refit="Recall",
+						 features=None, random_state=None) -> tuple:
+	"""Build GridSearchCV and run.
+	"""
+	X = X_train[features] if features else X_train
+	pipeline[0].fit(X, y_train)
+	
+	cv = StratifiedShuffleSplit(n_splits=n_splits, test_size=0.15,
+									    random_state=random_state)
+	
+	grid_search = GridSearchCV(pipeline, param_grid, scoring=scoring,
+										refit=refit, return_train_score=True,
+										cv=cv, n_jobs=8, verbose=2)
+	grid_search.fit(X, y_train)
 
-grid_search = GridSearchCV(pipeline, param_grid, scoring=scoring,
-									refit=refit, return_train_score=True,
-									cv=cv, n_jobs=-1)
-grid_search.fit(X_train, y_train)
+	print(f"The best {refit} is {grid_search.best_score_:.2f}")
+	print("Best model parameters:")
+	for prm, val in grid_search.best_params_.items():
+		print(f"  {prm}: {val}")
+	features_used = pipeline[0].get_feature_names_out()
+	print("Features:", simplify_feature_names(features_used))
 
-print(f"Best {refit} is {grid_search.best_score_:.2f}")
-print("Best model parameters:")
-for prm, val in grid_search.best_params_.items():
-	print(f"  {prm}: {val}")
+	# Summarize scores for train/validation sets
+	df_scores = scores_from_gridsearch(grid_search)
 
-# Summarize scores for train/validation sets
-df_scores = scores_from_gridsearch(grid_search)
-# df_scores
-
-# Add scores for the test group (for the final model only)
-if False:
-	if isinstance(scoring, dict):
-		new_dict = {}
-		for name, scorer in scoring.items():
-			if isinstance(scorer, str):
-				scorer = get_scorer(scorer)
-			value = scorer(grid_search, X_test, y_test)
-			new_dict[name] = value
-		df_scores.loc["Test"] = new_dict
-
-	elif callable(scoring):
+	# Add scores for the Test set
+	if isinstance(scoring, str):
+		score = get_scorer(scoring)(grid_search, X_test, y_test)
+		new_dict = {scoring: score}
+	if callable(scoring):
 		new_dict = {key: f"{value:.2f}" for key, value in \
 			scoring(grid_search, X_test, y_test).items()}
-		df_scores.loc["Test"] = new_dict
+	df_scores.loc["Test"] = new_dict
+	return grid_search, df_scores
 
-df_scores
+
+param_grid = {
+	"mlpclassifier__hidden_layer_sizes":
+		[(1,), (10, 5), (10,), (100,), (100,10), (10,5,1)],
+	"mlpclassifier__activation": ["logistic", "relu"],
+	"mlpclassifier__alpha": [1e-4, 5e-4],
+}
+
+gs, mlp_scores = mlp_gridsearch(
+	X_train, y_train, X_test, y_test,
+	param_grid, n_splits=100, features=feat_hsv)
+beep()
+mlp_scores
+
+#%%
+original_ct_steps = ct.transformers.copy()
+original_ct_steps
 
 #%%
 # Look for the best threshold parameters in blob counting
