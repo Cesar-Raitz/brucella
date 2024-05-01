@@ -57,11 +57,11 @@ X_data.head(5)
 from sklearn.model_selection import train_test_split
 
 # We create a combined feature to stratify on both time and target class
-strat_info = X_data["time_cat"].astype(int)*2 + y_data
+X_data["strat_cat"] = X_data["time_cat"].astype(int)-1 + y_data*6
 
 X_train, X_test, y_train, y_test = train_test_split(
 		X_data, y_data, test_size=0.2, random_state=42,
-		stratify=strat_info)
+		stratify=X_data["strat_cat"])
 
 # Inspect the test/data proportions per time with a histogram
 rel_counts = lambda s: s.value_counts().sort_index() / len(s)
@@ -115,10 +115,10 @@ ct = make_column_transformer(
 	("passthrough", if_present(feat_histo)))
 
 mlp = MLPClassifier(activation="relu",
-						  hidden_layer_sizes=(16, 4, 1),
+						  hidden_layer_sizes=(1,),
 						  #learning_rate="constant",
 						  solver="lbfgs",
-						  max_iter=1000)
+						  max_iter=2000)
 
 pipeline = make_pipeline(ct, mlp)
 pipeline.fit(X_train, y_train)
@@ -128,6 +128,16 @@ print("Features:", simplify_feature_names(pipeline[0].get_feature_names_out()))
 print(f"{correct} ({correct/len(y_test)*100:.2f}%) correct predictions")
 print("Total layers =", mlp.n_layers_)
 pipeline
+
+
+#%%
+# It is difficult to evaluate the contribution of each feature to the model.
+# Even for a single perceptron the weights change at each run.
+coefficients = pandas.Series(
+	data=abs(pipeline[-1].coefs_[0][:,0]),
+	index=feat_hsv + feat_blobs + feat_histo
+)
+coefficients.sort_values(ascending=False)
 
 #%%
 from sklearn.metrics import confusion_matrix, roc_auc_score, brier_score_loss
@@ -159,14 +169,6 @@ DataFrame([
 	 my_scorer(pipeline, X_train, y_train),
 	 my_scorer(pipeline, X_test, y_test)
 ], index=["Train", "Test"])
-
-#%%
-# Order the first layer coefficients to evaluate which is more important
-coefficients = pandas.Series(
-	data=abs(pipeline.named_steps["mlpclassifier"].coefs_[0][:,0]),
-	index=feat_hsv + feat_blobs + feat_histo
-)
-coefficients.sort_values(ascending=False)
 
 #%%
 from sklearn.model_selection import GridSearchCV
@@ -203,10 +205,10 @@ from util import beep
 
 def mlp_gridsearch(X_train, y_train, X_test, y_test, param_grid,
 						 n_splits=50, scoring=my_scorer, refit="Recall",
-						 features=None, random_state=None) -> tuple:
+						 features="all", random_state=None) -> tuple:
 	"""Build GridSearchCV and run.
 	"""
-	X = X_train[features] if features else X_train
+	X = X_train[features] if isinstance(features, list) else X_train
 	pipeline[0].fit(X, y_train)
 	
 	cv = StratifiedShuffleSplit(n_splits=n_splits, test_size=0.15,
@@ -242,18 +244,34 @@ param_grid = {
 	"mlpclassifier__hidden_layer_sizes":
 		[(1,), (10, 5), (10,), (100,), (100,10), (10,5,1)],
 	"mlpclassifier__activation": ["logistic", "relu"],
-	"mlpclassifier__alpha": [1e-4, 5e-4],
+	"mlpclassifier__alpha": [1e-4, 5e-4, 1e-3],
+	"mlpclassifier__max_iter": [2000],
 }
 
-gs, mlp_scores = mlp_gridsearch(
+gs, scores = mlp_gridsearch(
 	X_train, y_train, X_test, y_test,
-	param_grid, n_splits=100, features=feat_hsv)
+	param_grid, n_splits=100, features="all")
 beep()
-mlp_scores
+scores
 
 #%%
-original_ct_steps = ct.transformers.copy()
-original_ct_steps
+# Save the grid_search
+import joblib
+
+if False:
+	joblib.dump(gs, "models/gs.joblib")
+
+#%% Reload the grid_search and use the best model to predict for the Test set
+from sklearn.pipeline import Pipeline
+saved_gs: GridSearchCV = joblib.load("models/gs.joblib")
+best_clf: Pipeline = saved_gs.best_estimator_
+results = my_scorer(best_clf, X_test, y_test)
+for metric, score in results.items():
+	if metric[-1] not in 'NP':
+		score = f"{score*100:4.1f} %"
+	print(f"{metric:>10} = {score}")
+
+
 
 #%%
 # Look for the best threshold parameters in blob counting
