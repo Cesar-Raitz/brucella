@@ -20,6 +20,24 @@ import matplotlib.pyplot as plt
 from pandas import DataFrame
 import pandas
 
+from sklearn.pipeline import make_pipeline, Pipeline
+from sklearn.model_selection import GridSearchCV
+import functools
+
+# HELPER FUNCTIONS
+def _if_present(cols: list, df: DataFrame) -> list:
+	return [c for c in cols if c in df.columns]
+
+def if_present(cols: list) -> list:
+	return functools.partial(_if_present, cols)
+
+def simplify_feature_names(features: list) -> list:
+	return [f.split('__')[-1] for f in features]
+
+#%%
+# Load the Dataset
+#===============================================================================
+
 def load_dataset(fname):
 	if fname.endswith("csv"):
 		df = pandas.read_csv(fname, index_col=0)
@@ -65,8 +83,8 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 # Inspect the test/data proportions per time with a histogram
 rel_counts = lambda s: s.value_counts().sort_index() / len(s)
-test_counts = rel_counts(X_test['time_cat'])
-total_counts = rel_counts(X_data['time_cat'])
+test_counts = rel_counts(X_test["time_cat"])
+total_counts = rel_counts(X_data["time_cat"])
 
 _, ax = plt.subplots()
 assert isinstance(ax, plt.Axes)
@@ -93,21 +111,11 @@ ax.legend();
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.compose import make_column_transformer
-from sklearn.pipeline import make_pipeline
-import functools
 
+#%%
 feat_hsv = ["mean_h", "mean_s", "mean_v"]
 feat_blobs = ["blobs_log", "blobs_dog", "blobs_doh"]
 feat_histo = ["h1", "h2", "h3", "h4", "h5"]
-
-def _if_present(cols: list, df: DataFrame) -> list:
-	return [c for c in cols if c in df.columns]
-
-def if_present(cols: list) -> list:
-	return functools.partial(_if_present, cols)
-
-def simplify_feature_names(features: list) -> list:
-	return [f.split('__')[-1] for f in features]
 
 ct = make_column_transformer(
 	(StandardScaler(), if_present(feat_hsv)),
@@ -164,15 +172,13 @@ def my_scorer(clf, X, y):
 			  "AUC": roc_auc_score(y, y_pred), "Loss": brier_score_loss(y, y_pred),
 			  "F1": f1, "TN": TN, "FP": FP, "FN": FN, "TP": TP}
 
-
+#%% Test on the current MLP pipeline
 DataFrame([
 	 my_scorer(pipeline, X_train, y_train),
 	 my_scorer(pipeline, X_test, y_test)
 ], index=["Train", "Test"])
 
 #%%
-from sklearn.model_selection import GridSearchCV
-
 def scores_from_gridsearch(gs: GridSearchCV, index=-1) -> DataFrame:
 	"""Produce a pandas.DataFrame for Train/Test scores on separate rows.
 	"""
@@ -255,22 +261,44 @@ beep()
 scores
 
 #%%
-# Save the grid_search
+# Save/load the grid search for the MLP model.
+#===============================================================================
 import joblib
 
 if False:
+	# Save the grid_search
 	joblib.dump(gs, "models/gs.joblib")
 
-#%% Reload the grid_search and use the best model to predict for the Test set
-from sklearn.pipeline import Pipeline
-saved_gs: GridSearchCV = joblib.load("models/gs.joblib")
-best_clf: Pipeline = saved_gs.best_estimator_
-results = my_scorer(best_clf, X_test, y_test)
+else:
+	# Reload the grid_search and use the best estimator to predict the outcomes
+	# for the Test set. Need my_scorer(), if_present(), and X_test to be defined.
+	saved_gs: GridSearchCV = joblib.load("models/gs.joblib")
+	best_clf: Pipeline = saved_gs.best_estimator_
+	results = my_scorer(best_clf, X_test, y_test)
+	for metric, score in results.items():
+		if metric[-1] not in 'NP':
+			score = f"{score*100:4.1f} %"
+		print(f"{metric:>10} = {score}")
+
+
+#%% Load data from Wanderson's experiments
+X2, y2, _ = load_dataset("data_wanderson.csv")
+
+cc = y2.value_counts()
+print(len(X2), "instances in this dataset")
+print(cc[1], "Positive,", cc[0], "Negative")
+X2.head(5)
+
+#%%
+results = my_scorer(best_clf, X2, y2)
 for metric, score in results.items():
 	if metric[-1] not in 'NP':
-		score = f"{score*100:4.1f} %"
+		score = f"{score*100:4.1f} %".replace("100.0", "100.")
 	print(f"{metric:>10} = {score}")
 
+#%% Where are the wrong predictions?
+y2_pred = best_clf.predict(X2)
+X2_false = X2[y2_pred != y2]
 
 
 #%%

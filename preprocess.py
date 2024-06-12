@@ -20,6 +20,7 @@ import numpy as np
 import skimage
 
 if __name__ == "__main__":
+	# Selected images to test cropping and feature extraction
 	test_folder = "test_images"
 	test_names = [
 		"02-03-23_positive2_90min.jpg",
@@ -27,7 +28,11 @@ if __name__ == "__main__":
 		"15-06-23_negative1_82min.jpg",
 		"30-06-23_positive2_13min.jpg",
 		"03-07-23_negative1_15min.jpg",
-		"03-07-23_negative1_12min.jpg"
+		"03-07-23_negative1_12min.jpg",
+		"12_Positivo_gota_diluição 1 para 10_11.3 min.bmp",
+		"4_Negativo_gota_diluição 1 para 25__10 min.bmp",
+		"3_Positivo_gota_diluição 1 para 50_7.3 min.bmp",
+		"3_Negativo_gota_diluição 1 para 100_7.3 min.bmp",
 	]
 
 # Default blob detection parameters
@@ -105,6 +110,8 @@ def __find_center(image: np.ndarray, warnings: set=None, ax: plt.Axes=None) \
 
 def crop_image(image_path: str|np.ndarray,
 					fiber_length=0, fiber_diameter=0,
+					pre_rotate: np.ndarray=None,
+					rescale: float=None,
 					correct_angle=True, show=False) -> dict:
 	"""Open an image and crops the part containing the optical fiber.
 
@@ -114,11 +121,13 @@ def crop_image(image_path: str|np.ndarray,
 
 		Parameters
 		----------
-		  * image_path - Location of the image file or the image data.
-		  * fiber_length - Default is the image's height (maximum length)
-		  * fiber_diameter - Default is 0, where the diameter will be 1.5&times;FWHM of the pixel intensity distribution along the transverse direction
-		  * correct_angle - Default is True, to detect the fibers' angle and rotate the image to align the fiber to the vertical direction (small angles only)
-		  * show - Shows the original and cropped images along with the cropping informations
+		  * `image_path` - Location of the image file or the image data array.
+		  * `fiber_length` - Default is the image's height (maximum length).
+		  * `fiber_diameter` - Default is 1.5&times;FWHM of the pixel intensity distribution along the transverse direction.
+		  * `pre_rotate` - Rotate the image before angle correction if two fiber endpoints are given (in px). Then the rotation angle and centerpoint are calculated, and the image is aligned vertically for cropping.
+		  * `rescale` - A scaling factor to resize the image after rotation.
+		  * `correct_angle` - Default is True, to detect the fibers' angle and rotate the image to align the fiber to the vertical direction (small angles only).
+		  * `show` - Shows the original and cropped images along with the cropping info, for evaluation.
 
 		Returns
 		-------
@@ -150,6 +159,21 @@ def crop_image(image_path: str|np.ndarray,
 	else:
 		axs = [None]*3
 	
+	# PRE-ROTATE THE IMAGE
+	if isinstance(pre_rotate, list):
+		pre_rotate = np.array(pre_rotate)
+
+	if isinstance(pre_rotate, np.ndarray):
+		delta = pre_rotate[1] - pre_rotate[0]
+		rot_center = (pre_rotate[0] + pre_rotate[1])/2
+		rot_angle = np.rad2deg(np.arctan(delta[1]/delta[0]))
+		img = skimage.transform.rotate(img, -rot_angle, center=rot_center)
+	
+	if isinstance(rescale, float):
+		img = skimage.transform.rescale(img,
+											 (rescale, rescale, 1),
+											 anti_aliasing=False)
+
 	# FIND THE FIBER'S CENTER POSITION
 	red = img[:, :, 0]
 	height = img.shape[0]
@@ -220,18 +244,22 @@ def crop_image(image_path: str|np.ndarray,
 
 
 if __name__ == "__main__":
-	def test_crop_image(i: int=None) -> dict:
+	def test_crop_image(i: int, **kwargs) -> dict:
+		"""Helper function to crop an image.
+		"""
 		global test_folder, test_names
-		if isinstance(i, int) and 0 <= i < len(test_names):
-			img_path = os.path.join(test_folder, test_names[i])
-			return crop_image(img_path, fiber_length=700, show=True)
-		else:
-			for name in test_names:
-				img_path = os.path.join(test_folder, name)
-				d = crop_image(test_folder + name, show=True)
-			return d
+		assert 0 <= i < len(test_names)
+		# Crop a single image and return its data in a dictionary
+		img_path = os.path.join(test_folder, test_names[i])
+		return crop_image(img_path, fiber_length=700, show=True,
+								**kwargs)
+	
 
-	d = test_crop_image(0)
+	# d = test_crop_image(5)
+	# d = test_crop_image(6, pre_rotate=[(598, 1178), (1509, 191)], rescale=0.5)
+	d = test_crop_image(7, pre_rotate=[(280, 1066), (1176, 140)], rescale=0.5)
+	# d = test_crop_image(8, pre_rotate=[(614, 1336), (1524, 380)], rescale=0.5)
+	# d = test_crop_image(9, pre_rotate=[(590, 1308), (1554, 296)], rescale=0.5)
 	print(d.keys())
 
 
@@ -451,20 +479,24 @@ def __is_image(file_name: str) -> bool:
 
 __re_min = re.compile(r"(\d+)\s?min")
 __re_date = re.compile(r"\d{1,2}-\d{1,2}-\d{1,2}")
+__re_dilution = re.compile(r"(\d+)\spara\s(\d+)")
 
 def __info_from_path(path: str) -> dict:
 	path = path.lower()
 	for cls in ["positive", "negative", "NA"]:   # find the class (pos/neg)
 		if cls in path: break
-	r1 = __re_min.search(path)                    # find the measurement time
-	r2 = __re_date.search(path)                   # find the measurement date
+	r1 = __re_min.search(path)           # find the measurement time
+	r2 = __re_date.search(path)          # find the measurement date
+	r3 = __re_dilution.search(path)      # find the solution's dilution
 	time = int(r1.group(1)) if r1 else 0
 	date = r2.group() if r2 else "NA"
-	return {"class": cls, "time": time, "date": date}
+	dilution = ':'.join(r3.groups()) if r3 else "NA"
+	return {"class": cls, "time": time, "date": date, "dilution": dilution}
 	
 
-def process_folder(search_folder: str, fiber_length=0, fiber_diameter=0,
-						 bins=5, output_folder="output", as_frame=True) \
+def process_folder(search_folder: str,
+						 bins=5, output_folder="output", as_frame=True,
+						 **kwargs) \
 						-> DataFrame | list[dict]:
 	"""
 		Read and process all images within a folder and subfolders. Return a list
@@ -504,7 +536,7 @@ def process_folder(search_folder: str, fiber_length=0, fiber_diameter=0,
 			print("\b", end="▀▌▄▐"[j%4])
 			# Crop the image and extract information
 			path = os.path.join(base, img_name)
-			info = crop_image(path, fiber_length, fiber_diameter)
+			info = crop_image(path, **kwargs)
 			_ = get_hsv_means(info, bins)
 			_ = count_blobs(info)
 			
@@ -518,7 +550,7 @@ def process_folder(search_folder: str, fiber_length=0, fiber_diameter=0,
 							 			check_contrast=False)
 				# Todo: Check if the quality keyword fails for .PNG files
 			
-			if not output_folder:
+			if output_folder:
 				del info["cropped"]
 			info_list.append(info)
 		end_text = f"\b{j+1} images"
@@ -531,8 +563,20 @@ def process_folder(search_folder: str, fiber_length=0, fiber_diameter=0,
 
 
 if __name__ == "__main__":
-	folder = "test_images"
-	df = process_folder(folder, fiber_diameter=50, output_folder="")
+	f = "test_images"
+	df = process_folder(f, fiber_diameter=50, output_folder="")
+ 
+	# folders = [
+	# 	("dilution_1_10",  [(598, 1178), (1509, 191)]),
+	# 	("dilution_1_25",  [(280, 1066), (1176, 140)]),
+	# 	("dilution_1_50",  [(614, 1336), (1524, 380)]),
+	# 	("dilution_1_100", [(590, 1308), (1554, 296)]),
+	# ]
+	# f, pr = folders[0]
+	# df = process_folder(os.path.join("data_wanderson", f),
+	# 						fiber_length=700, fiber_diameter=36,
+	# 						pre_rotate=pr, rescale=0.5)
+
 	print(df.head())
 
 
@@ -573,6 +617,7 @@ def folders_summary(cropped_df: DataFrame, summary_folder="summaries",
 
 		# GENERATE AN IMAGE STACK AND PLOT
 		sorted_df = group.sort_values("time")
+		#TODO Can we sort by class first?
 		
 		num = len(sorted_df)
 		_, axs = plt.subplots(num, 1, figsize=(6, num*0.3))
@@ -624,7 +669,8 @@ def folders_summary(cropped_df: DataFrame, summary_folder="summaries",
 
 
 if __name__ == "__main__":
-	# folders_summary(df, "")  # all folders and no saving!
+	# Generate a summary for all folders in the current df and no save
+	folders_summary(df, "")
 	
 	# Generate summaries AND SAVE
 	# folders_summary(df, "summaries")
@@ -686,3 +732,25 @@ if __name__ == "__main__":
 	csv_name = "data_jessica_2.csv"
 	df_all.to_csv(csv_name)
 	print(csv_name, "saved!")
+
+#%% Process images from  Wanderson's tests
+if __name__ == "__main__":
+	folders = [
+		("dilution_1_10",  [(598, 1178), (1509, 191)]),
+		("dilution_1_25",  [(280, 1066), (1176, 140)]),
+		("dilution_1_50",  [(614, 1336), (1524, 380)]),
+		("dilution_1_100", [(590, 1308), (1554, 296)]),
+	]
+
+	info_list = []
+	for f, pr in folders:
+		info_list.extend(
+			process_folder(os.path.join("data_wanderson", f), as_frame=False,
+						fiber_length=700, fiber_diameter=36,
+						pre_rotate=pr, rescale=0.5)
+		)
+	df = DataFrame(info_list)
+	df.to_csv("data_wanderson.csv")
+
+#%%
+folders_summary(df, "summaries_2")
