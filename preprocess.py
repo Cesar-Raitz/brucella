@@ -138,7 +138,7 @@ def crop_image(image_path: str|np.ndarray,
 		  * `cropped` - The cropped image
 		  * `warnings` - Possible image problems
 	"""
-	# CREATE A DICTIONARY FOR THE EXTRACTED DATA
+	# CREATE A DICTIONARY FOR THE PROCESSED DATA
 	the_dict = dict(name="", folder="", title="")
 	if isinstance(image_path, str):
 		l = image_path.replace('/','\\').split('\\')
@@ -159,7 +159,7 @@ def crop_image(image_path: str|np.ndarray,
 	else:
 		axs = [None]*3
 	
-	# PRE-ROTATE THE IMAGE
+	# PRE-ROTATE THE IMAGE (if necessary)
 	if isinstance(pre_rotate, list):
 		pre_rotate = np.array(pre_rotate)
 

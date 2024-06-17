@@ -63,6 +63,11 @@ def load_dataset(fname):
 # Load the features extract from Jéssica's experiments in 2023
 X_data, y_data, time_bins = load_dataset("data_jessica_2.csv")
 
+# Feature groups
+fts_hsv = ["mean_h", "mean_s", "mean_v"]
+fts_histo = ["h1", "h2", "h3", "h4", "h5"]
+fts_blobs = ["blobs_log", "blobs_dog", "blobs_doh"]
+
 cc = y_data.value_counts()
 print(len(X_data), "instances in this dataset")
 print(cc[1], "Positive,", cc[0], "Negative")
@@ -77,11 +82,17 @@ from sklearn.model_selection import train_test_split
 # We create a combined feature to stratify on both time and target class
 X_data["strat_cat"] = X_data["time_cat"].astype(int)-1 + y_data*6
 
+strat_series = X_data["time_cat"]
+
 X_train, X_test, y_train, y_test = train_test_split(
 		X_data, y_data, test_size=0.2, random_state=42,
-		stratify=X_data["strat_cat"])
+		stratify=strat_series)
 
-# Inspect the test/data proportions per time with a histogram
+# X_train, X_test, y_train, y_test = train_test_split(
+# 		X_data, y_data, test_size=0.2, random_state=42,
+# 		stratify=X_data["strat_cat"])
+
+#%% Inspect the test/data proportions per time with a histogram
 rel_counts = lambda s: s.value_counts().sort_index() / len(s)
 test_counts = rel_counts(X_test["time_cat"])
 total_counts = rel_counts(X_data["time_cat"])
@@ -89,7 +100,7 @@ total_counts = rel_counts(X_data["time_cat"])
 _, ax = plt.subplots()
 assert isinstance(ax, plt.Axes)
 xticks = np.arange(1, 7)
-w = 0.36
+w = 0.38
 x = xticks + w/2
 ax.bar(x, test_counts, width=w, edgecolor="black", label="Test set")
 ax.bar(x+w, total_counts, width=w, edgecolor="black", label="All data")
@@ -100,10 +111,37 @@ ax.set_xticklabels(time_bins[:-1])
 yticks = np.arange(0, 0.21, 0.05)
 ax.set_yticks(yticks)
 ax.set_yticklabels([f'{100*n:.0f}%' for n in yticks])
-ax.set_xlabel("Time (min)")
-ax.set_title("Sample Frequency")
+ax.set_xlabel("Time Range (min)")
+# ax.set_ylabel("Sample Frequency")
 ax.legend();
 
+#%% Inspect the test/data proportions per time with a histogram
+rel_counts = lambda s: s.value_counts().sort_index() / len(s)
+test_counts = rel_counts(X_test["time_cat"])
+total_counts = rel_counts(X_data["time_cat"])
+
+_, ax = plt.subplots()
+assert isinstance(ax, plt.Axes)
+xticks = np.arange(1, 7)
+w = 0.38
+x = xticks
+ax.bar(x-w/2, test_counts, width=w, edgecolor="black", label="Test set")
+ax.bar(x+w/2, total_counts, width=w, edgecolor="black", label="All data")
+
+ax.set_xticks(xticks)
+xlabels = [f"{n1}-{n2}" for n1, n2 in zip(time_bins, time_bins[1:])]
+ax.set_xticklabels(xlabels)
+
+ax.set_ylim(0, 0.21)
+# yticks = np.arange(0, 0.26, 0.05)
+# ax.set_yticks(yticks)
+yticks = ax.get_yticks()
+ylabels = [f'{100*n:.0f}%' for n in yticks]
+ax.set_yticklabels(ylabels)
+ax.set_xlabel("Time Interval (min)")
+# ax.set_ylabel("Sample Frequency")
+ax.legend(loc=9)
+plt.plot()
 
 #%%
 # Create a Multi-Layer Perceptron Cassifier model
@@ -112,15 +150,11 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.compose import make_column_transformer
 
-#%%
-feat_hsv = ["mean_h", "mean_s", "mean_v"]
-feat_blobs = ["blobs_log", "blobs_dog", "blobs_doh"]
-feat_histo = ["h1", "h2", "h3", "h4", "h5"]
 
 ct = make_column_transformer(
-	(StandardScaler(), if_present(feat_hsv)),
-	(StandardScaler(), if_present(feat_blobs)),
-	("passthrough", if_present(feat_histo)))
+	(StandardScaler(), if_present(fts_hsv)),
+	(StandardScaler(), if_present(fts_blobs)),
+	("passthrough", if_present(fts_histo)))
 
 mlp = MLPClassifier(activation="relu",
 						  hidden_layer_sizes=(1,),
@@ -143,7 +177,7 @@ pipeline
 # Even for a single perceptron the weights change at each run.
 coefficients = pandas.Series(
 	data=abs(pipeline[-1].coefs_[0][:,0]),
-	index=feat_hsv + feat_blobs + feat_histo
+	index=fts_hsv + fts_blobs + fts_histo
 )
 coefficients.sort_values(ascending=False)
 
@@ -248,10 +282,14 @@ def mlp_gridsearch(X_train, y_train, X_test, y_test, param_grid,
 
 param_grid = {
 	"mlpclassifier__hidden_layer_sizes":
-		[(1,), (10, 5), (10,), (100,), (100,10), (10,5,1)],
+		# [(1,), (10, 5), (10,), (100,), (100,10), (10,5,1)],
+		[(10,), (10, 10), (10, 10, 10),
+		 (50,), (50, 50), (50, 50, 50),
+		 (100,), (100, 100), (100, 100, 100)],
 	"mlpclassifier__activation": ["logistic", "relu"],
 	"mlpclassifier__alpha": [1e-4, 5e-4, 1e-3],
-	"mlpclassifier__max_iter": [2000],
+	"mlpclassifier__solver": ["lbfgs"],
+	"mlpclassifier__max_iter": [500],
 }
 
 gs, scores = mlp_gridsearch(
@@ -468,3 +506,175 @@ for curves, title, ax in zip(bc_curves, titles, axs):
 axs[2].set_xlabel("Threshold")
 axs[1].set_ylabel("Positive-Negative Blob Counts Overlap")
 plt.tight_layout()
+
+#%%
+# Calculate the Point-Biserial Correlation
+
+from pandas import DataFrame, Series
+from sklearn.compose import make_column_selector
+
+def PBC(data: DataFrame, target: Series, return_dfs=False) -> Series:
+	"""Calculate the Point-Biserial Correlation on numerical columns of a
+		DataFrame."""
+	cols = make_column_selector(dtype_include=np.number)(data)
+	neg_data = data.loc[target==0, cols]
+	pos_data = data.loc[target==1, cols]
+	M0 = neg_data.mean()
+	M1 = pos_data.mean()
+	n0 = len(neg_data)
+	n1 = len(pos_data)
+
+	pbc: Series = (M1 - M0) / data[cols].std() * np.sqrt(n0*n1/(n0+n1)**2)
+	pbc = pbc.sort_values(key=np.abs, ascending=False)
+	if return_dfs: return pbc, neg_data, pos_data
+	return pbc
+
+pbc = PBC(X_data, y_data)
+
+#%%
+# Plot the values of some features as a function of time
+
+_, neg_df, pos_df = PBC(X_data, y_data, return_dfs=True)
+fig, axs = plt.subplots(3, 1, figsize=(6,10), sharex="col")
+
+for feature, xlabel, ax in zip(["mean_v", "h5", "blobs_dog"],
+										 ["Mean Value", "H5", "Blob count (DoG)"],
+										 axs):	
+	neg_df.plot.scatter("time", feature, c="blue", ax=ax)
+	pos_df.plot.scatter("time", feature, c="red", ax=ax)
+	ax.set_ylabel(xlabel)
+
+ax.set_xlim([0, 125])
+ax.set_xlabel("Time (min)")
+plt.tight_layout()
+plt.show()
+
+ #%%============================================================================
+ #  PREPARE THE DATA TO PLOT SCATTER MATRICES
+ #==============================================================================
+nice_names = {a: b for a, b in zip(fts_hsv + fts_histo + fts_blobs,
+	["Mean Hue", "Mean Saturation", "Mean Value", "H1", "H2", "H3", "H4",
+	"H5", "Blob count (LoG)", "Blob count (DoG)", "Blob count (DoH)"])}
+
+nfts = lambda fts: [nice_names[n] for n in fts]
+
+# Make a single time copy of the dataset with target class
+# to be used with the pairplot
+df_data = X_data.rename(nice_names, axis=1)
+df_data["Sample"] = y_data.map({0:"Negative", 1:"Positive"})
+df_data.sort_values("Sample", ascending=False, inplace=True)
+
+#%%
+# Plot the scatter matrix using Seaborn
+import seaborn as sns
+
+def scatter_matrix(features, legend_pos=(0.8, 0.85), kind="scatter",
+						 alpha=None):
+	global nice_names, df_data
+	palette = {"Negative": "dodgerblue",
+				  "Positive": "orange"}
+	kws = {"alpha": alpha} if alpha else {}
+
+	features = [nice_names[n] for n in features]
+
+	g = sns.pairplot(df_data, hue="Sample", vars=features,
+						  kind=kind, markers=['o', 's'], plot_kws=kws,
+						  corner=True)
+	if legend_pos is not None:
+		g.legend.set_bbox_to_anchor(legend_pos)
+		g.legend.set_frame_on(True)
+
+# scatter_matrix(fts_blobs)
+# scatter_matrix(fts_histo)
+scatter_matrix(["mean_v", "h4", "blobs_dog"])
+
+#%%
+from sklearn.neighbors import KernelDensity
+from pandas import DataFrame, Series
+
+def plot_kde(X: Series, hue: Series, hues: list, ax: plt.Axes):
+	if isinstance(X, Series):
+		X = X.values
+		if isinstance(hue, Series):
+			hue = hue.values
+		else:
+			raise ValueError
+	
+	a, b = min(X), max(X)
+	d = (b - a) * 0.1
+	xd = np.linspace(a-d, b+d, 100)
+	
+	# Calculate the density distributions with a Gaussian kernel
+	distros = []
+	for h in hues:
+		# x = data.loc[data[hue]==h, [column]].values
+		x = X[hue==h]
+		kde = KernelDensity(bandwidth=x.std()*0.35)
+		ylog = kde.fit(x[:, None]).score_samples(xd[:, None])
+		distros.append(np.exp(ylog))
+	
+	# Plot the distributions normalized 1
+	m = max(max(dist) for dist in distros)
+	if isinstance(hues, dict):
+		colors = hues.values()
+	else:
+		colors = [None] * len(hues)
+	for yd, color in zip(distros, colors):
+		yd /= m
+		ax.fill_between(xd, yd, color=color, alpha=0.2)
+		ax.plot(xd, yd, color=color)
+
+
+def my_scatter_matrix(data, hue, x_vars, y_vars, hues=None, dph=0.4, kws=None):
+	if hues is None: hues = data[hue].unique()
+	cols, rows = len(x_vars), len(y_vars)
+	fs = np.array([cols, dph+rows]) * 4
+	_, axs = plt.subplots(rows+1, cols, sharey="row", sharex="col",
+								 figsize=fs, height_ratios=[dph] + [1]*rows)
+
+	# PLOT THE UNIVARIATE DISTRIBUTIONS
+	for column, ax in zip(x_vars, axs[0]):
+		plot_kde(data[column], data[hue], hues, ax=ax)
+		ax.get_yaxis().set_visible(False)
+
+	# PLOT THE BIVARIATE SCATTER PLOTS
+	for j, column in enumerate(x_vars):
+		for i, row in enumerate(y_vars):
+			ax = axs[i+1][j]
+			for k, h in enumerate(hues):
+				x = data.loc[data[hue]==h, column]
+				y = data.loc[data[hue]==h, row]
+				args = {}
+				if isinstance(kws, dict):
+					args = {key: val[k] for key, val in kws.items()}
+				if isinstance(hues, dict): args["color"] = hues[h]
+				ax.plot(x, y, lw=0, label=h, **args)
+			ax.grid("on")
+
+	for j, column in enumerate(x_vars): axs[-1][j].set_xlabel(column, fontsize=16)
+	for i, row in enumerate(y_vars): axs[i+1][0].set_ylabel(row, fontsize=16)
+	axs[-1][-1].legend(prop={"size": 14})
+	plt.subplots_adjust(hspace=0.1, wspace=0.1)
+
+
+options = dict(marker='os')
+hues = {"Positive": "orange", "Negative": "dodgerblue"}
+my_scatter_matrix(df_data, "Sample", hues=hues,
+						y_vars=nfts(["mean_v", "mean_s"]),
+						x_vars=["H4", "H5", "H1", "Blob count (LoG)"],
+						kws=options)
+
+#%%
+
+my_scatter_matrix(df_data, "Sample", hues=hues,
+						x_vars=nfts(fts_histo),
+						y_vars=nfts(fts_hsv),
+						kws=options)
+
+#%%
+my_scatter_matrix(df_data, "Sample", hues=hues,
+						x_vars=nfts(fts_blobs)+["time"],
+						y_vars=nfts(fts_hsv),
+						kws=options)
+
+# %%
