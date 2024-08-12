@@ -73,6 +73,13 @@ print(len(X_data), "instances in this dataset")
 print(cc[1], "Positive,", cc[0], "Negative")
 X_data.head(5)
 
+#%%
+nice_names = {a: b for a, b in zip(fts_hsv + fts_histo + fts_blobs,
+	["Mean Hue", "Mean Saturation", "Mean Value", "H1", "H2", "H3", "H4",
+	"H5", "Blob count (LoG)", "Blob count (DoG)", "Blob count (DoH)"])}
+nice_names["time"] = "Time [min]"
+# Convert a list of feature names to nice names
+nfts = lambda fts: [nice_names[n] for n in fts]
 
 #%%
 # Split the population in train/test sets keeping the time category proportions
@@ -87,10 +94,6 @@ strat_series = X_data["time_cat"]
 X_train, X_test, y_train, y_test = train_test_split(
 		X_data, y_data, test_size=0.2, random_state=42,
 		stratify=strat_series)
-
-# X_train, X_test, y_train, y_test = train_test_split(
-# 		X_data, y_data, test_size=0.2, random_state=42,
-# 		stratify=X_data["strat_cat"])
 
 #%% Inspect the test/data proportions per time with a histogram
 rel_counts = lambda s: s.value_counts().sort_index() / len(s)
@@ -202,9 +205,15 @@ def my_scorer(clf, X, y):
 	precision = TP / (TP+FP)
 	recall = TP / (TP+FN)
 	f1 = 2*precision*recall / (precision+recall)
-	return {"Accuracy": accuracy, "Precision": precision, "Recall": recall,
-			  "AUC": roc_auc_score(y, y_pred), "Loss": brier_score_loss(y, y_pred),
-			  "F1": f1, "TN": TN, "FP": FP, "FN": FN, "TP": TP}
+	scores = {
+		"Accuracy": accuracy, "Precision": precision, "Recall": recall,
+		"Loss": brier_score_loss(y, y_pred), "F1": f1,
+		"TN": TN, "FP": FP, "FN": FN, "TP": TP}
+	try:
+		scores["AUC"] = roc_auc_score(y, y_pred)
+	except ValueError:
+		pass
+	return scores
 
 #%% Test on the current MLP pipeline
 DataFrame([
@@ -213,14 +222,18 @@ DataFrame([
 ], index=["Train", "Test"])
 
 #%%
-def scores_from_gridsearch(gs: GridSearchCV, index=-1) -> DataFrame:
+def scores_from_gridsearch(gs: GridSearchCV, index=-1,
+									train_d=2, valid_d=2) -> DataFrame:
 	"""Produce a pandas.DataFrame for Train/Test scores on separate rows.
 	"""
 	results = gs.cv_results_
 	if index < 0: index = gs.best_index_
-	ve_to_str = lambda val, err: f"{val:.2f} ±{err:.2f}"
+	# ve_to_str = lambda val, err: f"{val:.2f} ±{err:.2f}"
 
-	def scores_for(set_name):
+	def scores_for(set_name, decimals):
+		fmt = f"{{:.{decimals}f}}"
+		fmt = fmt + '±' + fmt
+		
 		the_dict = {}
 		prefix = "mean_" + set_name + "_"
 		for key, array in results.items():
@@ -228,19 +241,24 @@ def scores_from_gridsearch(gs: GridSearchCV, index=-1) -> DataFrame:
 				new_key = key[len(prefix):]
 				mean = array[index]
 				std = results["std_"+key[5:]][index]
-				the_dict[new_key] = ve_to_str(mean, std)
+				the_dict[new_key] = fmt.format(mean, std)
 		
 		return the_dict
 	
-	return DataFrame([scores_for("train"), scores_for("test")],
-							index=["Training", "Validation"])
+	return DataFrame([
+		scores_for("train", train_d), scores_for("test", valid_d)],
+		index=["Training", "Validation"])
 
-#%%
+
+# scores_from_gridsearch(gs, train_d=2)
+
+#%% time
 # Use GridSearchCV to find the best hyper-parametes
 #===============================================================================
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.metrics import get_scorer
 from util import beep
+import time
 
 
 def mlp_gridsearch(X_train, y_train, X_test, y_test, param_grid,
@@ -256,9 +274,12 @@ def mlp_gridsearch(X_train, y_train, X_test, y_test, param_grid,
 	
 	grid_search = GridSearchCV(pipeline, param_grid, scoring=scoring,
 										refit=refit, return_train_score=True,
-										cv=cv, n_jobs=8, verbose=2)
+										cv=cv, n_jobs=8, verbose=4)
+	
+	st = time.time()
 	grid_search.fit(X, y_train)
-
+	tt = time.time() - st
+	print(f"The search time is {tt/60:.0f} min {tt%60:.0f} seconds")
 	print(f"The best {refit} is {grid_search.best_score_:.2f}")
 	print("Best model parameters:")
 	for prm, val in grid_search.best_params_.items():
@@ -282,9 +303,10 @@ def mlp_gridsearch(X_train, y_train, X_test, y_test, param_grid,
 
 param_grid = {
 	"mlpclassifier__hidden_layer_sizes":
+		# [(1,)],
 		# [(1,), (10, 5), (10,), (100,), (100,10), (10,5,1)],
-		[(10,), (10, 10), (10, 10, 10),
-		 (50,), (50, 50), (50, 50, 50),
+		[(10,),  (10, 10),   (10, 10, 10),
+		 (50,),  (50, 50),   (50, 50, 50),
 		 (100,), (100, 100), (100, 100, 100)],
 	"mlpclassifier__activation": ["logistic", "relu"],
 	"mlpclassifier__alpha": [1e-4, 5e-4, 1e-3],
@@ -299,24 +321,40 @@ beep()
 scores
 
 #%%
+for k in gs.cv_results_:
+	if "mean" in k:
+		print(k)
+
+print(len(gs.cv_results_["mean_fit_time"]))
+
+#%%
 # Save/load the grid search for the MLP model.
 #===============================================================================
 import joblib
 
 if False:
 	# Save the grid_search
-	joblib.dump(gs, "models/gs.joblib")
+	joblib.dump(gs, "models/gs_240617_b.joblib")
 
 else:
 	# Reload the grid_search and use the best estimator to predict the outcomes
 	# for the Test set. Need my_scorer(), if_present(), and X_test to be defined.
-	saved_gs: GridSearchCV = joblib.load("models/gs.joblib")
+	saved_gs: GridSearchCV = joblib.load("models/gs_240617.joblib")
 	best_clf: Pipeline = saved_gs.best_estimator_
 	results = my_scorer(best_clf, X_test, y_test)
 	for metric, score in results.items():
 		if metric[-1] not in 'NP':
 			score = f"{score*100:4.1f} %"
 		print(f"{metric:>10} = {score}")
+	print(scores_from_gridsearch(saved_gs))
+	print("Best model parameters:")
+	for prm, val in saved_gs.best_params_.items():
+		print(f"  {prm}: {val}")
+
+#%%
+# Lets see which samples are incorrectly classified
+y_pred = best_clf.predict(X_test)
+X_test[y_pred != y_test]
 
 
 #%% Load data from Wanderson's experiments
@@ -328,11 +366,20 @@ print(cc[1], "Positive,", cc[0], "Negative")
 X2.head(5)
 
 #%%
-results = my_scorer(best_clf, X2, y2)
-for metric, score in results.items():
-	if metric[-1] not in 'NP':
-		score = f"{score*100:4.1f} %".replace("100.0", "100.")
-	print(f"{metric:>10} = {score}")
+for dilution, X in X2.groupby("dilution"):
+	
+	y = y2[X.index]
+	res = my_scorer(best_clf, X, y)
+	print("Results for dilution", dilution)
+	print("  #Samples:", len(X))
+	print("  Accuracy:", res["Accuracy"])
+	print("    Recall:", res["Recall"])
+
+# results = my_scorer(best_clf, X2, y2)
+# for metric, score in results.items():
+# 	if metric[-1] not in 'NP':
+# 		score = f"{score*100:4.1f} %".replace("100.0", "100.")
+# 	print(f"{metric:>10} = {score}")
 
 #%% Where are the wrong predictions?
 y2_pred = best_clf.predict(X2)
@@ -537,14 +584,56 @@ pbc = PBC(X_data, y_data)
 _, neg_df, pos_df = PBC(X_data, y_data, return_dfs=True)
 fig, axs = plt.subplots(3, 1, figsize=(6,10), sharex="col")
 
-for feature, xlabel, ax in zip(["mean_v", "h5", "blobs_dog"],
-										 ["Mean Value", "H5", "Blob count (DoG)"],
-										 axs):	
+feats = ["mean_v", "blobs_dog", "blobs_log"]
+
+for feature, ylabel, ax in zip(feats, nfts(feats), axs):
+
 	neg_df.plot.scatter("time", feature, c="blue", ax=ax)
 	pos_df.plot.scatter("time", feature, c="red", ax=ax)
-	ax.set_ylabel(xlabel)
+	ax.set_ylabel(ylabel)
 
 ax.set_xlim([0, 125])
+ax.set_xlabel("Time (min)")
+plt.tight_layout()
+plt.show()
+
+#%%
+#
+
+def features_std(input_df, features) -> DataFrame:
+
+	dt = 5
+	bins = np.arange(2.5, 125, dt)
+	labs = range(0, len(bins)-1)
+	time_cat = pandas.cut(input_df["time"], bins=bins, labels=labs)
+
+	std_data = []
+	for i in labs:
+		bin_data = input_df[time_cat==i]
+		std_data.append(bin_data[features].std())
+
+	df = DataFrame(std_data)
+	df['time'] = (np.array(labs)+1)*dt
+	return df
+
+neg_std = features_std(neg_df, feats)
+pos_std = features_std(pos_df, feats)
+
+#%%
+fig, axs = plt.subplots(3, 1, figsize=(5,8), sharex="col")
+
+for feature, ylabel, ax in zip(feats, nfts(feats), axs):
+	assert isinstance(ax, plt.Axes)
+	# pos_std.plot.scatter("time", feature, c="red", ax=ax, label="Positive")
+	# neg_std.plot.scatter("time", feature, c="blue", ax=ax, label="Negative")
+
+	ax.plot(neg_std["time"], neg_std[feature]**2, "s-", label="Negative", ms=5)
+	ax.plot(pos_std["time"], pos_std[feature]**2, ".-", label="Positive", ms=10)
+	ax.set_ylabel(ylabel)
+	ax.legend()
+
+# ax.set_xlim([0, 125])
+axs[0].set_title("Variance")
 ax.set_xlabel("Time (min)")
 plt.tight_layout()
 plt.show()
@@ -552,11 +641,7 @@ plt.show()
  #%%============================================================================
  #  PREPARE THE DATA TO PLOT SCATTER MATRICES
  #==============================================================================
-nice_names = {a: b for a, b in zip(fts_hsv + fts_histo + fts_blobs,
-	["Mean Hue", "Mean Saturation", "Mean Value", "H1", "H2", "H3", "H4",
-	"H5", "Blob count (LoG)", "Blob count (DoG)", "Blob count (DoH)"])}
 
-nfts = lambda fts: [nice_names[n] for n in fts]
 
 # Make a single time copy of the dataset with target class
 # to be used with the pairplot
@@ -676,5 +761,3 @@ my_scatter_matrix(df_data, "Sample", hues=hues,
 						x_vars=nfts(fts_blobs)+["time"],
 						y_vars=nfts(fts_hsv),
 						kws=options)
-
-# %%
