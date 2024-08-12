@@ -10,7 +10,7 @@
 
 	Format: UTF-8 w/tabs
 """
-__version__ = "1.00.1"
+__version__ = "1.00"
 
 #%%
 # Load the Dataset
@@ -34,10 +34,10 @@ def if_present(cols: list) -> list:
 def simplify_feature_names(features: list) -> list:
 	return [f.split('__')[-1] for f in features]
 
+
 #%%
 # Load the Dataset
 #===============================================================================
-
 def load_dataset(fname):
 	if fname.endswith("csv"):
 		df = pandas.read_csv(fname, index_col=0)
@@ -80,6 +80,7 @@ nice_names = {a: b for a, b in zip(fts_hsv + fts_histo + fts_blobs,
 nice_names["time"] = "Time [min]"
 # Convert a list of feature names to nice names
 nfts = lambda fts: [nice_names[n] for n in fts]
+
 
 #%%
 # Split the population in train/test sets keeping the time category proportions
@@ -584,9 +585,9 @@ pbc = PBC(X_data, y_data)
 _, neg_df, pos_df = PBC(X_data, y_data, return_dfs=True)
 fig, axs = plt.subplots(3, 1, figsize=(6,10), sharex="col")
 
-feats = ["mean_v", "blobs_dog", "blobs_log"]
+fts = ["mean_v", "blobs_dog", "blobs_log"]
 
-for feature, ylabel, ax in zip(feats, nfts(feats), axs):
+for feature, ylabel, ax in zip(fts, nfts(fts), axs):
 
 	neg_df.plot.scatter("time", feature, c="blue", ax=ax)
 	pos_df.plot.scatter("time", feature, c="red", ax=ax)
@@ -616,13 +617,13 @@ def features_std(input_df, features) -> DataFrame:
 	df['time'] = (np.array(labs)+1)*dt
 	return df
 
-neg_std = features_std(neg_df, feats)
-pos_std = features_std(pos_df, feats)
+neg_std = features_std(neg_df, fts)
+pos_std = features_std(pos_df, fts)
 
 #%%
 fig, axs = plt.subplots(3, 1, figsize=(5,8), sharex="col")
 
-for feature, ylabel, ax in zip(feats, nfts(feats), axs):
+for feature, ylabel, ax in zip(fts, nfts(fts), axs):
 	assert isinstance(ax, plt.Axes)
 	# pos_std.plot.scatter("time", feature, c="red", ax=ax, label="Positive")
 	# neg_std.plot.scatter("time", feature, c="blue", ax=ax, label="Negative")
@@ -641,10 +642,8 @@ plt.show()
  #%%============================================================================
  #  PREPARE THE DATA TO PLOT SCATTER MATRICES
  #==============================================================================
-
-
-# Make a single time copy of the dataset with target class
-# to be used with the pairplot
+# Make a single time copy of the dataset with target class to be used with the
+# pairplot.
 df_data = X_data.rename(nice_names, axis=1)
 df_data["Sample"] = y_data.map({0:"Negative", 1:"Positive"})
 df_data.sort_values("Sample", ascending=False, inplace=True)
@@ -761,3 +760,25 @@ my_scatter_matrix(df_data, "Sample", hues=hues,
 						x_vars=nfts(fts_blobs)+["time"],
 						y_vars=nfts(fts_hsv),
 						kws=options)
+
+#%%
+# Prepara tables for the Supporting Information
+#===============================================================================
+def print_table(folder):
+	"""Print a formatted table with the rows of a given sample (folder) of the
+	   Brucellosis experiment's.
+	"""
+	int_cols = ["time"] + fts_blobs   # integer columns
+	fp_cols = fts_histo + fts_hsv     # floating-point columns
+	fts = int_cols + fp_cols 
+	df = X_data.loc[X_data["folder"] == folder, fts] \
+		.sort_values("time").rename(columns=nice_names) 
+	df.index = range(1, len(df)+1)
+	xlsx = folder + ".xlsx"
+	txt = df.style.format("{:.3f}", subset=nfts(fp_cols)) \
+		           .to_string(delimiter='\t')
+	print(txt)
+
+
+# print_table("14-03-23_negative3")
+print_table("29-06-23_positive1")
