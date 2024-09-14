@@ -4,6 +4,9 @@
 	Mackenzie - São Paulo. This study was developed in colaboration with
 	Supernano / UFRJ - Rio de Janeiro.
 
+	Based on the original work by Bianca Tieppo:
+	https://github.com/biancatieppo/MASTER-Brucella_Detection
+
 	Author: Cesar Raitz Junior
 	Creation: Feb-10-2024
 	Licence: MIT
@@ -61,7 +64,7 @@ def load_dataset(fname):
 
 
 # Load the features extract from Jéssica's experiments in 2023
-X_data, y_data, time_bins = load_dataset("data_jessica_2.csv")
+X_data, y_data, time_bins = load_dataset("data_csv/data_jessica_2.csv")
 
 # Feature groups
 fts_hsv = ["mean_h", "mean_s", "mean_v"]
@@ -359,7 +362,7 @@ X_test[y_pred != y_test]
 
 
 #%% Load data from Wanderson's experiments
-X2, y2, _ = load_dataset("data_wanderson.csv")
+X2, y2, _ = load_dataset("data_csv/data_wanderson.csv")
 
 cc = y2.value_counts()
 print(len(X2), "instances in this dataset")

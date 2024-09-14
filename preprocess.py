@@ -4,6 +4,9 @@
 	Supernano / UFRJ - Rio de Janeiro and
 	Mackgraphe / Mackenzie - São Paulo.
 
+	Based on the original work by Bianca Tieppo:
+	https://github.com/biancatieppo/MASTER-Brucella_Detection
+
 	Author: Cesar Raitz Junior
 	Creation: Feb-10-2024
 	Licence: MIT
@@ -685,8 +688,8 @@ if __name__ == "__main__":
 		folder = "data_jessica"
 		df = process_folder(folder, fiber_length=700, fiber_diameter=36)
 		# folders_summary(df, "summaries")
-		df.to_excel("data_jessica.xlsx")
-		df.to_csv("data_jessica.csv")
+		# df.to_excel("data_csv/data_jessica.xlsx")
+		df.to_csv("data_csv/data_jessica.csv")
 		print("Done!")
 		return df
 	
@@ -695,7 +698,7 @@ if __name__ == "__main__":
 #%%
 if __name__ == "__main__":
 	# Read data obtained from experiments performed by Jéssica
-	df_all = pandas.read_csv("data_jessica.csv", index_col=0)
+	df_all = pandas.read_csv("data_csv/data_jessica.csv", index_col=0)
 
 
 #%%
@@ -753,4 +756,5 @@ if __name__ == "__main__":
 	df.to_csv("data_wanderson.csv")
 
 #%%
-folders_summary(df, "summaries_2")
+if __name__ == "__main__":
+	folders_summary(df, "summaries_2")
